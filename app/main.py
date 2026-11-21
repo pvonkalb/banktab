@@ -100,7 +100,7 @@ def _first_run_check(conn) -> None:
     raw = secrets.token_hex(4).upper()
     _setup_code = f"{raw[:4]}-{raw[4:]}"
     msg = f"No accounts yet. Open the app and create the first one with this setup code: {_setup_code}"
-    accounts.log.warning(msg)
+    # print, not log: one clear banner even before logging is configured
     print(f"\n{'=' * 72}\n  {msg}\n{'=' * 72}\n", flush=True)
 
 
