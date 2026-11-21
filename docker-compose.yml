@@ -1,15 +1,15 @@
 # Self-hosting with Docker Compose:
 #   cp .env.example .env      # then edit it
 #   docker compose up -d
-#   docker compose logs budget   # shows the one-time setup code for the first account
+#   docker compose logs banktab   # shows the one-time setup code for the first account
 #
 # The app listens on 127.0.0.1:8000 only. Reach it through a reverse proxy or tunnel that adds
 # HTTPS (Caddy, Cloudflare Tunnel, Tailscale serve). Don't publish port 8000 to the internet.
 
 services:
-  budget:
+  banktab:
     build: .
-    container_name: budget
+    container_name: banktab
     restart: unless-stopped
     env_file:
       - path: .env
@@ -17,7 +17,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - budget-data:/data
+      - banktab-data:/data
     read_only: true            # the app only writes to /data
     tmpfs:
       - /tmp
@@ -27,4 +27,4 @@ services:
       - ALL
 
 volumes:
-  budget-data:
+  banktab-data:

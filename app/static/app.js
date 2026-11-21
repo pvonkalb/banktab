@@ -165,9 +165,9 @@ function shell(active, ...content) {
       extra === "add-btn" ? el("span.plus", {}, icon(name)) : icon(name), el("span", {}, label));
   return el("div.shell", {},
     el("nav.nav", { "aria-label": "Main" },
-      el("a.brand", { href: "#/dash", "aria-label": "Budget home" },
+      el("a.brand", { href: "#/dash", "aria-label": "Banktab home" },
         logo(),
-        el("span", {}, el("b", {}, S.household.name), el("small", {}, "Budget"))),
+        el("span", {}, el("b", {}, S.household.name), el("small", {}, "Banktab"))),
       link(`#/dash/${S.summary.ym}`, "dash", "Dashboard", "dash"),
       link(`#/month/${S.summary.ym}`, "month", "Month", "month"),
       link("#/add", "plus", "Add", "add", "add-btn"),
@@ -225,7 +225,7 @@ async function getConfig() {
 
 function authPage(title, sub, ...content) {
   $app.replaceChildren(el("div.login", {},
-    el("div.login-brand", {}, logo(), el("span", {}, "Budget")),
+    el("div.login-brand", {}, logo(), el("span", {}, "Banktab")),
     el("h1", {}, title),
     sub ? el("p.muted", {}, sub) : null,
     ...content,
@@ -371,7 +371,7 @@ function renderPrivacy() {
   const p = (...t) => el("p", {}, ...t);
   authPage("Privacy", null,
     el("div.prose", {},
-      p("This is a small, self-hosted budget app run by one person for friends and family. It isn't a company and there are no ads."),
+      p("Banktab is a small, self-hosted budget app, run here by one person for friends and family. It isn't a company and there are no ads."),
       el("h2", {}, "What's stored"),
       p("Your name, email, a scrambled (hashed) version of your password, and whatever you put in your budget: categories, entries, notes, bills and income. ",
         "Each household's budget is kept in its own separate file, so households can't see each other's data."),
@@ -1693,7 +1693,7 @@ function settingsAccount(body) {
   getConfig().then(() => {
     const about = body.querySelector("p.about");
     if (!about) return;
-    about.append(`Budget ${CONFIG.version || ""} · free software under the `,
+    about.append(`Banktab ${CONFIG.version || ""} · free software under the `,
       el("a", { href: "https://www.gnu.org/licenses/agpl-3.0.html", target: "_blank", rel: "noopener noreferrer" }, "AGPL-3.0"),
       CONFIG.source ? [" · ", el("a", { href: CONFIG.source, target: "_blank", rel: "noopener noreferrer" }, "Source code")] : "");
   });

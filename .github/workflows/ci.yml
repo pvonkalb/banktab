@@ -40,15 +40,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t budget:ci .
+        run: docker build -t banktab:ci .
       - name: Start it and wait for the health check
         run: |
-          docker run -d --name budget -p 127.0.0.1:8000:8000 budget:ci
+          docker run -d --name banktab -p 127.0.0.1:8000:8000 banktab:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8000/api/health; then exit 0; fi
             sleep 1
           done
-          docker logs budget
+          docker logs banktab
           exit 1
       - name: Setup code is printed on first start
-        run: docker logs budget 2>&1 | grep -q "setup code"
+        run: docker logs banktab 2>&1 | grep -q "setup code"

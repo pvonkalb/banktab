@@ -1,4 +1,5 @@
-<h1 align="center">Budget</h1>
+<p align="center"><img src="app/static/icon.svg" alt="" width="72"></p>
+<h1 align="center">Banktab</h1>
 
 <p align="center">
   <b>A self-hosted envelope budget for households.</b><br>
@@ -6,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/pvonkalb/envelope-budget/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/pvonkalb/envelope-budget/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/pvonkalb/banktab/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/pvonkalb/banktab/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
   <img alt="Python 3.13" src="https://img.shields.io/badge/python-3.13-3776AB">
   <img alt="No build step" src="https://img.shields.io/badge/front%20end-no%20build%20step-0f766e">
@@ -17,9 +18,12 @@
 I built this to replace the Google Sheet my wife and I had budgeted with for four years. The
 sheet worked, but closing a month meant copying formulas and pasting values by hand, it was
 clumsy on a phone, and it couldn't answer simple questions like "what did we spend on food
-this quarter?". This app keeps the same method (zero-based envelopes with rollover) and makes
+this quarter?". Banktab keeps the same method (zero-based envelopes with rollover) and makes
 the tedious parts one click. One server can host several households, each completely separate,
 so friends and family can have their own.
+
+Each category is a *tab* in your household's *bank*: money goes into the tabs at the start of
+the month, and whatever's left in a tab stays there for later.
 
 *Every screenshot here uses a made-up demo household. You can generate the same one with
 `python tools/demo.py`.*
@@ -74,10 +78,10 @@ so friends and family can have their own.
 ## Quick start (Docker Compose)
 
 ```sh
-git clone https://github.com/pvonkalb/envelope-budget.git && cd envelope-budget
+git clone https://github.com/pvonkalb/banktab.git && cd banktab
 cp .env.example .env              # optional: sign-ups, email, backups
 docker compose up -d
-docker compose logs budget        # look for "setup code: XXXX-XXXX"
+docker compose logs banktab       # look for "setup code: XXXX-XXXX"
 ```
 
 Open http://127.0.0.1:8000, enter the setup code and create the first account. It becomes the
@@ -162,7 +166,7 @@ python tools/backup.py                                      # one-off backup of 
 python tools/demo.py --data demo-data                       # made-up demo household
 ```
 
-With Docker, prefix these with `docker compose exec budget`. Moving from a spreadsheet? Export
+With Docker, prefix these with `docker compose exec banktab`. Moving from a spreadsheet? Export
 transactions as CSV and use **Settings → Import**.
 
 ## Development

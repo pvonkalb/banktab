@@ -1,6 +1,6 @@
 # Security policy
 
-Budget holds people's financial records, so security reports are very welcome.
+Banktab holds people's financial records, so security reports are very welcome.
 
 ## Reporting a vulnerability
 

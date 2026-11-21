@@ -1,6 +1,6 @@
 {
-  "name": "Budget",
-  "short_name": "Budget",
+  "name": "Banktab",
+  "short_name": "Banktab",
   "start_url": "/#/dash",
   "scope": "/",
   "display": "standalone",

@@ -1,4 +1,4 @@
-"""HTTP API + static front end.
+"""Banktab: HTTP API + static front end.
 
 Run locally:  .venv/Scripts/python -m uvicorn app.main:app --reload
 
@@ -12,7 +12,7 @@ Settings (environment variables):
   BUDGET_BACKUP_KEEP    daily automatic backups to keep in <data>/backups (default 14, 0 = off)
   BUDGET_SOURCE_URL     where this copy's source code lives (AGPL-3.0: set it if you changed the code)
 
-Budget is free software under the GNU Affero General Public License v3.0 (see LICENSE).
+Banktab is free software under the GNU Affero General Public License v3.0 (see LICENSE).
 """
 from __future__ import annotations
 
@@ -386,7 +386,7 @@ def first_run(body: FirstRunIn, request: Request, response: Response, conn=Depen
 
 def _send_verify(conn, request: Request, user_id: int, email: str) -> None:
     token = accounts.make_token(conn, "verify", user_id=user_id, email=email)
-    accounts.send_email(email, "Confirm your email for Budget",
+    accounts.send_email(email, "Confirm your email for Banktab",
                         f"Confirm your email address to finish setting up your budget:\n\n{_link(request, 'verify', token)}\n\n"
                         "The link works for 48 hours. If you didn't sign up, you can ignore this email.")
 
@@ -452,9 +452,9 @@ def verify(body: TokenIn, request: Request, response: Response, conn=Depends(acc
             old = conn.execute("SELECT email FROM users WHERE id=?", (t["user_id"],)).fetchone()["email"]
             conn.execute("UPDATE users SET email=? WHERE id=?", (t["email"], t["user_id"]))
             if old and old.lower() != t["email"].lower():
-                accounts.send_email(old, "Your Budget email address was changed",
-                                    f"The email on your Budget account was changed to {t['email']}.\n\n"
-                                    "If that wasn't you, reset your password right away and tell whoever runs your Budget server.")
+                accounts.send_email(old, "Your Banktab email address was changed",
+                                    f"The email on your Banktab account was changed to {t['email']}.\n\n"
+                                    "If that wasn't you, reset your password right away and tell whoever runs your Banktab server.")
         conn.execute("UPDATE users SET email_verified_at=datetime('now') WHERE id=?", (t["user_id"],))
         _start_session(conn, t["user_id"], response, request)
     return {"ok": True}
@@ -475,7 +475,7 @@ def forgot(body: EmailIn, request: Request, conn=Depends(acct)):
                        (body.email.strip(),)).fetchone()
     if row:
         token = accounts.make_token(conn, "reset", user_id=row["id"])
-        accounts.send_email(row["email"], "Reset your Budget password",
+        accounts.send_email(row["email"], "Reset your Banktab password",
                             f"Someone asked to reset your password. To choose a new one, open:\n\n{_link(request, 'reset', token)}\n\n"
                             "The link works for 1 hour. If it wasn't you, ignore this email and nothing changes.")
     return {"ok": True}
