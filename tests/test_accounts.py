@@ -209,9 +209,11 @@ def test_csv_import(env):
     chk = c.post("/api/import/check", headers=H, json={"rows": [
         {"date": d, "description": "COSTCO WHSE #0001", "amount_cents": 4210},
         {"date": d, "description": "KING SOOPERS", "amount_cents": 1899},
-        {"date": "garbage", "description": "x", "amount_cents": 1}]}).json()
+        {"date": "garbage", "description": "x", "amount_cents": 1},
+        {"date": d, "description": "REFUND", "amount_cents": -4210}]}).json()
     assert chk[0]["duplicate_of"]["description"] == "costco"
     assert chk[1]["duplicate_of"] is None and chk[2]["duplicate_of"] is None
+    assert chk[3]["duplicate_of"] is None  # money coming in never matches a purchase of the same size
     r = c.post("/api/import/commit", headers=H, json={"rows": [
         {"date": d, "description": "KING SOOPERS", "amount_cents": 1899, "category_id": 1, "ym": ym},
         {"date": d, "description": "REFUND", "amount_cents": -500, "category_id": 2, "ym": ym}]})

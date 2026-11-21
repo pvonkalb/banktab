@@ -1139,7 +1139,7 @@ async function renderBatch(params) {
       if (!ask.length) return;
       try {
         const res = await api("POST", "/api/import/check", { rows: ask.map((q) => ({
-          date: q.x.date.value || `${month.value}-15`, description: q.x.desc.value, amount_cents: Math.abs(q.cents) })) });
+          date: q.x.date.value || `${month.value}-15`, description: q.x.desc.value, amount_cents: q.cents })) });
         ask.forEach((q, i) => {
           const d = res[i].duplicate_of;
           // Without a date, only flag an undated or same-month match (the ±4 day window is a guess).
@@ -1228,7 +1228,9 @@ async function renderReports(params) {
   const firstYm = S.months[0]?.ym || start;
   // Only count months that have happened: a period still in progress is compared "so far".
   const lastDone = end < thisMonth ? end : thisMonth;
-  const n = Math.max(0, monthsBetween(start, lastDone));
+  // ...and only months the budget has: a year that started in April averages over April onward.
+  const effStart = start < firstYm ? firstYm : start;
+  const n = Math.max(0, monthsBetween(effStart, lastDone));
   const span = kind === "year" ? 12 : kind === "quarter" ? 3 : 1;
   const prevStart = ymAdd(start, -span), lyStart = ymAdd(start, -12);
   const chartStart = ymAdd(end, -11);
@@ -1260,14 +1262,16 @@ async function renderReports(params) {
   const spendOnly = (id) => !isSaved(id);
   const tot = (a, b, key, pred = () => true) =>
     data.rows.reduce((acc, r) => acc + (r.ym >= a && r.ym <= b && pred(r.category_id) ? r[key] : 0), 0);
-  const cmpEnd = (s) => ymAdd(s, n - 1);  // same number of months as this period so far
+  // Compare the same stretch of months, one period (or one year) earlier.
+  const prevFrom = ymAdd(effStart, -span), prevTo = ymAdd(lastDone, -span);
+  const lyFrom = ymAdd(effStart, -12), lyTo = ymAdd(lastDone, -12);
 
-  const spent = tot(start, lastDone, "spent", spendOnly);
-  const budget = tot(start, lastDone, "budget", spendOnly);
-  const saved = tot(start, lastDone, "spent", isSaved);
-  const added = tot(start, lastDone, "added");
-  const prevSpent = prevStart >= firstYm ? tot(prevStart, cmpEnd(prevStart), "spent", spendOnly) : null;
-  const lySpent = lyStart >= firstYm ? tot(lyStart, cmpEnd(lyStart), "spent", spendOnly) : null;
+  const spent = tot(effStart, lastDone, "spent", spendOnly);
+  const budget = tot(effStart, lastDone, "budget", spendOnly);
+  const saved = tot(effStart, lastDone, "spent", isSaved);
+  const added = tot(effStart, lastDone, "added");
+  const prevSpent = prevFrom >= firstYm ? tot(prevFrom, prevTo, "spent", spendOnly) : null;
+  const lySpent = lyFrom >= firstYm ? tot(lyFrom, lyTo, "spent", spendOnly) : null;
 
   // Per category for this period, plus the previous period for the change column.
   const byCat = {};
@@ -1277,7 +1281,7 @@ async function renderReports(params) {
     t.spent += r.spent; t.budget += r.budget;
   }
   if (prevSpent !== null) for (const r of data.rows)
-    if (r.ym >= prevStart && r.ym <= cmpEnd(prevStart) && byCat[r.category_id]) byCat[r.category_id].prev += r.spent;
+    if (r.ym >= prevFrom && r.ym <= prevTo && byCat[r.category_id]) byCat[r.category_id].prev += r.spent;
   const list = Object.values(byCat).filter((t) => t.spent || t.budget);
 
   // Spending going up is shown in the "bad" color, down in the "good" color, always with an arrow + number.

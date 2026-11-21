@@ -14,3 +14,6 @@ __pycache__/
 
 # Personal scripts (e.g. the importer for our own spreadsheet layout)
 private/
+
+# Demo household made by tools/demo.py
+demo-data/

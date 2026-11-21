@@ -1289,8 +1289,8 @@ class ImportCheck(BaseModel):
 
 @app.post("/api/import/check")
 def import_check(body: ImportCheck, user=Depends(current_user), conn=Depends(db)):
-    """For each row: is something with the same amount already logged within 4 days of it?
-    (Card purchases often post a day or two after you log them.)"""
+    """For each row: is something with the same amount, going the same way (spent vs. money in),
+    already logged within 4 days of it? (Card purchases often post a day or two after you log them.)"""
     out = []
     for r in body.rows:
         try:
@@ -1301,11 +1301,11 @@ def import_check(body: ImportCheck, user=Depends(current_user), conn=Depends(db)
         m = conn.execute(
             """SELECT t.id, t.description, t.date, t.ym, c.name AS category FROM transactions t
                LEFT JOIN categories c ON c.id = t.category_id
-               WHERE t.kind IN ('spend','add') AND abs(t.amount_cents) = ?
+               WHERE t.kind IN ('spend','add') AND t.amount_cents = ?
                  AND (COALESCE(t.posted_date, t.date) BETWEEN ? AND ?
                       OR (t.date IS NULL AND t.ym = ?))
                ORDER BY t.id DESC LIMIT 1""",
-            (abs(r.amount_cents), lo, hi, r.date[:7])).fetchone()
+            (r.amount_cents, lo, hi, r.date[:7])).fetchone()
         out.append({"duplicate_of": dict(m) if m else None})
     return out
 
