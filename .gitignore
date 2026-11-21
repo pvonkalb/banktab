@@ -1,0 +1,16 @@
+# Financial data never goes in git
+data/
+*.db
+*.db-*
+*.xlsx
+*.csv
+
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Server settings and email passwords
+.env
+
+# Personal scripts (e.g. the importer for our own spreadsheet layout)
+private/

@@ -1,0 +1,4 @@
+# Consistent LF line endings in the repo (Docker/Linux friendly); binary files untouched.
+* text=auto eol=lf
+*.png binary
+*.db binary
