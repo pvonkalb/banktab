@@ -1621,12 +1621,15 @@ async function settingsHousehold(body) {
 }
 
 const THEMES = [["system", "Match device", "Light or dark, following your phone or computer"], ["light", "Light", "Clean and bright"],
-  ["dark", "Dark", "Easy on the eyes at night"], ["noir", "Noir", "True black, great on OLED phones"], ["paper", "Paper", "Warm, low-glare light"]];
+  ["dark", "Dark", "Easy on the eyes at night"], ["noir", "Noir", "True black, great on OLED phones"], ["paper", "Paper", "Warm, low-glare light"],
+  ["bank", "Bank", "Dark wood and gold, like an old vault"]];
 const ACCENTS = [["teal", "Teal", "#0f766e"], ["blue", "Blue", "#1d4ed8"], ["violet", "Violet", "#6d28d9"], ["rose", "Rose", "#be123c"],
-  ["amber", "Amber", "#a14a08"], ["green", "Green", "#137336"], ["graphite", "Graphite", "#334155"]];
+  ["amber", "Amber", "#a14a08"], ["green", "Green", "#137336"], ["graphite", "Graphite", "#334155"], ["gold", "Gold", "#c9971f"]];
 
 function settingsAppearance(body) {
   const save = async (patch) => {
+    // The Bank theme comes with gold; any accent can still be picked afterwards.
+    if (patch.theme === "bank" && S.user.theme !== "bank" && !patch.accent) patch = { ...patch, accent: "gold" };
     const theme = patch.theme || S.user.theme, accent = patch.accent || S.user.accent;
     applyTheme(theme, accent);  // instant; the server copy makes it follow you to other devices
     try { await api("PATCH", "/api/account", patch); await loadState(); draw(); } catch (x) { toast(x.message, true); }

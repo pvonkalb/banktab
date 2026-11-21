@@ -55,7 +55,7 @@ the month, and whatever's left in a tab stays there for later.
 **Households**
 - Several households per server, **each in its own database file**.
 - Invite a partner by link; owners and members; sign-up with email confirmation; password reset.
-- Five themes (Match device, Light, Dark, Noir, Paper) and seven accent colors, per person.
+- Six themes (Match device, Light, Dark, Noir, Paper and Bank: dark wood and gold) and eight accent colors, per person.
 - Installable on a phone (PWA), currency per household, CSV export and full-backup download.
 
 <table>
@@ -65,7 +65,7 @@ the month, and whatever's left in a tab stays there for later.
   </tr>
   <tr>
     <td><img src="docs/screenshots/import.png" alt="Bank CSV import review with categories guessed and a transfer flagged"><br><sub><b>Bank import.</b> Every row reviewed; transfers and duplicates flagged.</sub></td>
-    <td><img src="docs/screenshots/theme-noir.png" alt="Dashboard in the Noir theme with a violet accent"><br><sub><b>Themes.</b> Noir with a violet accent.</sub></td>
+    <td><img src="docs/screenshots/theme-bank.png" alt="Dashboard in the Bank theme: dark wood, parchment text and gold"><br><sub><b>Themes.</b> Bank: dark wood and gold.</sub></td>
   </tr>
 </table>
 

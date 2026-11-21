@@ -44,8 +44,8 @@ MAX_HOUSEHOLDS = int(os.environ.get("BUDGET_MAX_HOUSEHOLDS", "100"))
 BACKUP_KEEP = int(os.environ.get("BUDGET_BACKUP_KEEP", "14"))
 VERSION = "1.0.0"
 SOURCE_URL = os.environ.get("BUDGET_SOURCE_URL", "")
-THEMES = ("system", "light", "dark", "noir", "paper")
-ACCENTS = ("teal", "blue", "violet", "rose", "amber", "green", "graphite")
+THEMES = ("system", "light", "dark", "noir", "paper", "bank")
+ACCENTS = ("teal", "blue", "violet", "rose", "amber", "green", "graphite", "gold")
 MAX_BODY = 3 * 1024 * 1024  # bytes; CSV imports are the biggest requests
 COOKIE = "budget_session"
 SESSION_DAYS = 90
@@ -663,8 +663,8 @@ def delete_household(body: PasswordConfirm, request: Request, response: Response
 class AccountPatch(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=60)
     email: str | None = Field(None, max_length=254)
-    theme: Literal["system", "light", "dark", "noir", "paper"] | None = None
-    accent: Literal["teal", "blue", "violet", "rose", "amber", "green", "graphite"] | None = None
+    theme: Literal["system", "light", "dark", "noir", "paper", "bank"] | None = None
+    accent: Literal["teal", "blue", "violet", "rose", "amber", "green", "graphite", "gold"] | None = None
 
 
 @app.patch("/api/account")

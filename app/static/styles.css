@@ -15,6 +15,7 @@
 :root[data-accent="amber"]    { --a-light: #a14a08; --a-light-soft: #fdecd2; --a-dark: #fbbf24; --a-dark-soft: #3d2a0c; --a-dark-ink: #2a1a03; }
 :root[data-accent="green"]    { --a-light: #137336; --a-light-soft: #dcf3e3; --a-dark: #4ade80; --a-dark-soft: #143823; --a-dark-ink: #062a14; }
 :root[data-accent="graphite"] { --a-light: #334155; --a-light-soft: #e2e6eb; --a-dark: #e5e7eb; --a-dark-soft: #2a2d33; --a-dark-ink: #111214; }
+:root[data-accent="gold"]     { --a-light: #8a6410; --a-light-soft: #f6ead0; --a-dark: #e8b941; --a-dark-soft: #4a3714; --a-dark-ink: #2a1c06; }
 
 /* Light (also the default) */
 :root {
@@ -49,6 +50,23 @@
     --shadow: none; color-scheme: dark;
   }
 }
+/* Bank: dark wood, parchment text and gold, like an old vault. Original colors and CSS only. */
+:root[data-theme="bank"] {
+  --bg: #1f170f; --surface: #2c2116; --surface-2: #3a2c1d;
+  --ink: #f3e6c4; --ink-2: #d6c49b; --ink-3: #ab9771; --line: #4d3b28;
+  --accent: var(--a-dark); --accent-ink: var(--a-dark-ink); --accent-soft: var(--a-dark-soft); --bar: var(--a-dark);
+  --good: #9bd46f; --bad: #ff8a6b; --bad-soft: #43201a; --warn: #ffcf5c; --bar-over: #ff8a6b;
+  --shadow: inset 0 1px 0 rgba(255, 230, 170, .05), 0 2px 10px rgba(0, 0, 0, .35); color-scheme: dark;
+}
+/* Faint wood grain: long, soft vertical stripes drawn with gradients. */
+:root[data-theme="bank"] body {
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 220, 160, .018) 0 2px, transparent 2px 9px, rgba(0, 0, 0, .05) 9px 10px, transparent 10px 23px),
+    linear-gradient(180deg, #231a11, #1b140d) fixed;
+}
+:root[data-theme="bank"] .nav { background: linear-gradient(180deg, #2a1f14, #241a10); }
+:root[data-theme="bank"] .card { border-color: #5a452d; }
+:root[data-theme="bank"] .top { background: rgba(33, 24, 16, .94); backdrop-filter: blur(3px); }
 /* Noir: true black, neutral greys (great on OLED phones) */
 :root[data-theme="noir"] {
   --bg: #000000; --surface: #0c0c0c; --surface-2: #171717;
@@ -398,7 +416,10 @@ kbd { font-family: var(--num); font-size: 12px; border: 1px solid var(--line); b
 .theme-preview[data-preview="paper"] { background: #f3eee4; } .theme-preview[data-preview="paper"] i, .theme-preview[data-preview="paper"] b { background: #fbf8f1; }
 .theme-preview[data-preview="dark"] { background: #0f1412; } .theme-preview[data-preview="dark"] i, .theme-preview[data-preview="dark"] b { background: #1f2824; }
 .theme-preview[data-preview="noir"] { background: #000; } .theme-preview[data-preview="noir"] i, .theme-preview[data-preview="noir"] b { background: #171717; }
+.theme-preview[data-preview="bank"] { background: repeating-linear-gradient(90deg, #221910 0 7px, #1d150e 7px 9px); }
+.theme-preview[data-preview="bank"] i, .theme-preview[data-preview="bank"] b { background: #3a2c1d; box-shadow: inset 0 0 0 1px #5a452d; }
 .theme-preview[data-preview="dark"] u, .theme-preview[data-preview="noir"] u { background: var(--a-dark); }
+.theme-preview[data-preview="bank"] u { background: #e8b941; }
 .theme-preview[data-preview="system"] { background: linear-gradient(135deg, #f6f7f5 50%, #0f1412 50%); }
 .theme-preview[data-preview="system"] i { background: linear-gradient(135deg, #fff 50%, #1f2824 50%); }
 .theme-preview[data-preview="system"] b { background: rgba(128, 128, 128, .35); }

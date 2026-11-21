@@ -379,6 +379,9 @@ def test_theme_currency_backup_health(env):
     assert p.get("/api/health").json()["ok"] is True
     assert p.patch("/api/account", headers=H, json={"theme": "noir", "accent": "violet"}).status_code == 200
     assert p.patch("/api/account", headers=H, json={"theme": "neon"}).status_code == 422
+    assert p.patch("/api/account", headers=H, json={"theme": "bank", "accent": "gold"}).status_code == 200
+    assert p.get("/api/state").json()["user"]["theme"] == "bank"
+    p.patch("/api/account", headers=H, json={"theme": "noir", "accent": "violet"})
     st = p.get("/api/state").json()
     assert st["user"]["theme"] == "noir" and st["user"]["accent"] == "violet"
     assert p.patch("/api/household", headers=H, json={"currency": "eur"}).status_code == 422
