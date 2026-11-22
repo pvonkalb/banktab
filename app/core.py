@@ -47,6 +47,94 @@ def init_db(conn: sqlite3.Connection) -> None:
     if "goal_cents" not in cols:
         conn.execute("ALTER TABLE categories ADD COLUMN goal_cents INTEGER")
         conn.execute("ALTER TABLE categories ADD COLUMN goal_ym TEXT")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
+    if "bill_id" not in cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN bill_id INTEGER REFERENCES bills(id) ON DELETE SET NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_tx_bill ON transactions(bill_id, ym)")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(bills)")}
+    if "due_day" not in cols:
+        conn.execute("ALTER TABLE bills ADD COLUMN due_day INTEGER CHECK (due_day BETWEEN 1 AND 31)")
+        conn.execute("ALTER TABLE bills ADD COLUMN due_month INTEGER CHECK (due_month BETWEEN 1 AND 12)")
+        # Best guess from the old free-text "renews" note, e.g. 'Dec' or 'aug 31st'.
+        for b in conn.execute("SELECT id, renews FROM bills WHERE renews != ''").fetchall():
+            month, day = parse_renews(b["renews"])
+            if month or day:
+                conn.execute("UPDATE bills SET due_month=?, due_day=? WHERE id=?", (month, day, b["id"]))
+
+
+MONTH_ABBR = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+
+
+def parse_renews(text: str) -> tuple[int | None, int | None]:
+    """'Dec' -> (12, None); 'aug 31st' -> (8, 31); 'the 15th' -> (None, 15); anything else -> (None, None)."""
+    import re
+    t = (text or "").strip().lower()
+    month = next((i + 1 for i, m in enumerate(MONTH_ABBR) if re.search(rf"\b{m}", t)), None)
+    d = re.search(r"\b([0-9]{1,2})(st|nd|rd|th)?\b", t)
+    day = int(d.group(1)) if d and 1 <= int(d.group(1)) <= 31 else None
+    return month, day
+
+
+# ---------------------------------------------------------------- bills due
+
+def bill_due_in(bill, ym: str) -> bool | None:
+    """True/False if the bill is due in `ym`; None if it can't be known (quarterly/yearly with no month)."""
+    if bill["frequency"] == "monthly":
+        return True
+    if not bill["due_month"]:
+        return None
+    m = int(ym[5:7])
+    if bill["frequency"] == "quarterly":
+        return (m - bill["due_month"]) % 3 == 0
+    return m == bill["due_month"]
+
+
+def bill_due_date(bill, ym: str) -> str:
+    """Due date inside `ym` (the 31st becomes the month's last day); the 1st if no day is set."""
+    import calendar
+    y, m = int(ym[:4]), int(ym[5:7])
+    day = min(bill["due_day"] or 1, calendar.monthrange(y, m)[1])
+    return f"{ym}-{day:02d}"
+
+
+def bills_due(conn, ym: str) -> dict:
+    """Active bills due in `ym`, each with whether it was logged (or skipped) this month,
+    plus active quarterly/yearly bills that still need a due month."""
+    due, unknown = [], []
+    logged = {r["bill_id"]: dict(r) for r in conn.execute(
+        "SELECT bill_id, id AS tx_id, amount_cents AS logged_cents FROM transactions WHERE ym=? AND bill_id IS NOT NULL", (ym,))}
+    skipped = {r[0] for r in conn.execute("SELECT bill_id FROM bill_skips WHERE ym=?", (ym,))}
+    for b in conn.execute("""SELECT b.*, c.name AS category FROM bills b LEFT JOIN categories c ON c.id = b.category_id
+                             WHERE b.active=1 ORDER BY COALESCE(b.due_day, 99), b.name""").fetchall():
+        is_due = bill_due_in(b, ym)
+        if is_due is None:
+            unknown.append({"id": b["id"], "name": b["name"], "frequency": b["frequency"]})
+            continue
+        if not is_due:
+            continue
+        d = dict(b)
+        d["due_date"] = bill_due_date(b, ym)
+        d["logged"] = logged.get(b["id"])
+        d["skipped"] = b["id"] in skipped
+        due.append(d)
+    return {"ym": ym, "due": due, "needs_month": unknown}
+
+
+def log_bill(conn, bill_id: int, *, ym: str, amount_cents: int, date: str | None = None,
+             category_id: int | None = None, user_id: int | None = None) -> int:
+    b = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if b is None:
+        raise BudgetError("That bill no longer exists")
+    if conn.execute("SELECT 1 FROM transactions WHERE ym=? AND bill_id=?", (ym, bill_id)).fetchone():
+        raise BudgetError(f"{b['name']} is already logged for this month")
+    cat = category_id or b["category_id"]
+    if not cat:
+        raise BudgetError("Pick a category for this bill")
+    tx_id = add_entry(conn, ym=ym, category_id=cat, amount_cents=amount_cents, description=b["name"],
+                      date=date or bill_due_date(b, ym), user_id=user_id, source="bill")
+    conn.execute("UPDATE transactions SET bill_id=? WHERE id=?", (bill_id, tx_id))
+    conn.execute("DELETE FROM bill_skips WHERE bill_id=? AND ym=?", (bill_id, ym))
+    return tx_id
 
 
 # Year an entry counts toward in tracker reports: purchase date, else month, else known year.

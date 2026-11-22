@@ -341,3 +341,78 @@ def test_totp_rfc6238_vectors():
         assert totp.code_at(s, t // 30) == want
         assert totp.verify(s, want, now=t) == t // 30
         assert totp.verify(s, want, now=t, last_step=t // 30) is None
+
+
+# ---------------------------------------------------------------- recurring bills (tap to log)
+
+def test_parse_renews_and_due_rules():
+    assert core.parse_renews("Dec") == (12, None)
+    assert core.parse_renews("aug 31st") == (8, 31)
+    assert core.parse_renews("sept") == (9, None)
+    assert core.parse_renews("April") == (4, None)
+    assert core.parse_renews("the 15th") == (None, 15)
+    assert core.parse_renews("") == (None, None)
+    b = lambda f, m=None, d=None: {"frequency": f, "due_month": m, "due_day": d}
+    assert core.bill_due_in(b("monthly"), "2026-11") is True
+    assert core.bill_due_in(b("yearly"), "2026-11") is None                      # month unknown
+    assert core.bill_due_in(b("yearly", 11), "2026-11") and not core.bill_due_in(b("yearly", 12), "2026-11")
+    assert [m for m in range(1, 13) if core.bill_due_in(b("quarterly", 2), f"2026-{m:02d}")] == [2, 5, 8, 11]
+    assert core.bill_due_date(b("monthly", None, 31), "2027-02") == "2027-02-28"
+    assert core.bill_due_date(b("monthly"), "2026-11") == "2026-11-01"
+
+
+def test_log_skip_and_due_list(client):
+    login(client)
+    ym = client.get("/api/state").json()["summary"]["ym"]
+    m = int(ym[5:])
+    add = lambda **b: client.post("/api/bills", headers=H, json={"renews": "", "notes": "", "active": True, **b}).json()["id"]
+    phone = add(name="Phone", amount_cents=6000, frequency="monthly", category_id=1, due_day=15)
+    yearly = add(name="Domain", amount_cents=1200, frequency="yearly", category_id=2, due_month=m)
+    other = add(name="Insurance", amount_cents=50000, frequency="yearly", category_id=2, due_month=m % 12 + 1)
+    unknown = add(name="Mystery", amount_cents=900, frequency="quarterly", category_id=2)
+    nocat = add(name="Gym", amount_cents=3000, frequency="monthly", due_day=3)
+
+    d = client.get(f"/api/bills/due?ym={ym}").json()
+    assert [x["name"] for x in d["due"]] == ["Gym", "Phone", "Domain"]          # by due day, unset last
+    assert d["needs_month"] == [{"id": unknown, "name": "Mystery", "frequency": "quarterly"}]
+    assert all(x["logged"] is None and not x["skipped"] for x in d["due"])
+    assert next(x for x in d["due"] if x["name"] == "Phone")["due_date"] == f"{ym}-15"
+
+    # log with an edited amount; it becomes a normal spend entry linked to the bill
+    r = client.post(f"/api/bills/{phone}/log", headers=H, json={"ym": ym, "amount_cents": 6150})
+    assert r.status_code == 200
+    tx = client.get(f"/api/entries/{r.json()['id']}").json()
+    assert (tx["description"], tx["amount_cents"], tx["category_id"], tx["date"]) == ("Phone", 6150, 1, f"{ym}-15")
+    assert client.post(f"/api/bills/{phone}/log", headers=H, json={"ym": ym, "amount_cents": 6000}).status_code == 400
+    # a bill without a category needs one picked
+    assert client.post(f"/api/bills/{nocat}/log", headers=H, json={"ym": ym, "amount_cents": 3000}).status_code == 400
+    assert client.post(f"/api/bills/{nocat}/log", headers=H, json={"ym": ym, "amount_cents": 3000, "category_id": 2}).status_code == 200
+    # skip and un-skip
+    client.post(f"/api/bills/{yearly}/skip", headers=H, json={"ym": ym})
+    d = {x["name"]: x for x in client.get(f"/api/bills/due?ym={ym}").json()["due"]}
+    assert d["Phone"]["logged"]["logged_cents"] == 6150 and d["Domain"]["skipped"] is True
+    client.post(f"/api/bills/{yearly}/skip", headers=H, json={"ym": ym, "skip": False})
+    assert {x["name"]: x for x in client.get(f"/api/bills/due?ym={ym}").json()["due"]}["Domain"]["skipped"] is False
+    # deleting the entry makes the bill due again; deleting the bill keeps the entry
+    client.delete(f"/api/entries/{r.json()['id']}", headers=H)
+    assert {x["name"]: x for x in client.get(f"/api/bills/due?ym={ym}").json()["due"]}["Phone"]["logged"] is None
+    gym_tx = {x["name"]: x for x in client.get(f"/api/bills/due?ym={ym}").json()["due"]}["Gym"]["logged"]["tx_id"]
+    client.delete(f"/api/bills/{nocat}", headers=H)
+    assert client.get(f"/api/entries/{gym_tx}").json()["bill_id"] is None
+    assert other not in [x["id"] for x in client.get(f"/api/bills/due?ym={ym}").json()["due"]]
+
+
+def test_bill_columns_added_to_older_databases(tmp_path):
+    conn = core.connect(tmp_path / "old.db")
+    s = core.SCHEMA.read_text(encoding="utf-8")
+    s = s.replace("    bill_id      INTEGER REFERENCES bills(id) ON DELETE SET NULL,  -- logged from the bills' due list\n", "")
+    s = s.replace("    active       INTEGER NOT NULL DEFAULT 1,\n    due_day      INTEGER CHECK (due_day BETWEEN 1 AND 31),    -- day of the month it's paid (optional)\n"
+                  "    due_month    INTEGER CHECK (due_month BETWEEN 1 AND 12)   -- quarterly/yearly: a month it's due in\n",
+                  "    active       INTEGER NOT NULL DEFAULT 1\n")
+    assert "due_day      INTEGER" not in s and "bill_id      INTEGER" not in s
+    conn.executescript(s)
+    conn.execute("INSERT INTO bills(name, amount_cents, frequency, renews) VALUES ('Domain', 1200, 'yearly', 'aug 31st')")
+    core.init_db(conn)
+    assert {"bill_id"} <= {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
+    assert tuple(conn.execute("SELECT due_month, due_day FROM bills").fetchone()) == (8, 31)
+    conn.close()

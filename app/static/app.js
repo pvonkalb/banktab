@@ -593,11 +593,84 @@ async function renderDashboard(ym) {
     el("div.section-h", {}, el("h2", {}, "Savings goals")),
     el("div.card.goals", {}, withGoals.map((c) => el("a.goal-link", { href: `#/cat/${c.id}/${m.ym}` }, goalBlock(c))))] : null;
 
+  const dueWrap = el("div", {});
   $app.replaceChildren(shell("dash",
     monthHeader("#/dash", monthAction()),
-    banner, stats, table, goals,
+    banner, stats, dueWrap, table, goals,
     el("p.small.faint", {}, "Tap a category for its entries and history. Months = how many months of budget the bank holds.",
       withGoals.length ? null : " Saving up for something? Open a category and set a goal.")));
+  if (m.status === "open") fillDueCard(dueWrap, m.ym).catch(() => {});
+}
+
+// ------------------------------------------------------------------ bills due this month (tap to log)
+
+const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+
+async function fillDueCard(wrap, ym) {
+  const d = await api("GET", `/api/bills/due?ym=${ym}`);
+  const todo = d.due.filter((b) => !b.logged && !b.skipped), done = d.due.filter((b) => b.logged || b.skipped);
+  if (!d.due.length && !d.needs_month.length) return;
+  const today = todayISO();
+  const row = (b) => {
+    const late = !b.logged && !b.skipped && b.due_day && b.due_date < today;
+    const when = b.due_day ? `due ${dateLabel(b.due_date)}` : "due this month";
+    const status = b.logged ? "logged" : b.skipped ? "skipped" : late ? `${when}, not logged yet` : when;
+    return el("div.due-row", { class: b.logged || b.skipped ? "done" : null },
+      el("div.name", {}, b.name, el("div.sub", { class: late ? "warn-text" : null }, [status, b.category].filter(Boolean).join(" · "))),
+      el("div.amt.num", {}, money(b.logged ? b.logged.logged_cents : b.amount_cents)),
+      el("div.actions", { style: "flex-wrap:nowrap;gap:6px" },
+        b.logged ? el("button.btn.sm", { type: "button", onclick: () => go(`#/edit/${b.logged.tx_id}`) }, "View")
+          : b.skipped ? el("button.btn.sm", { type: "button", onclick: () => skipBill(b, ym, false) }, "Undo skip")
+            : [el("button.btn.sm", { type: "button", onclick: () => skipBill(b, ym, true), title: "Not paying it this month" }, "Skip"),
+              el("button.btn.sm.primary", { type: "button", onclick: () => logBillDialog(b, ym) }, "Log")]));
+  };
+  // Keep the dashboard table (the quick view) near the top: show a few, the rest on request.
+  const SHOW = 3;
+  const moreList = el("div", { hidden: true }, todo.slice(SHOW).map(row));
+  const more = todo.length > SHOW ? el("button.link-btn", { type: "button" }, `Show ${todo.length - SHOW} more`) : null;
+  if (more) more.addEventListener("click", () => { moreList.hidden = !moreList.hidden; more.textContent = moreList.hidden ? `Show ${todo.length - SHOW} more` : "Show fewer"; });
+  const doneList = el("div", { hidden: true }, done.map(row));
+  const toggle = done.length ? el("button.link-btn", { type: "button" }, `Show ${done.length} done`) : null;
+  if (toggle) toggle.addEventListener("click", () => { doneList.hidden = !doneList.hidden; toggle.textContent = doneList.hidden ? `Show ${done.length} done` : "Hide done"; });
+  const needs = d.needs_month.length ? el("a.small", { href: "#/settings?tab=bills" },
+    `${d.needs_month.length} quarterly/yearly bill${d.needs_month.length > 1 ? "s need" : " needs"} a due month to show up here`) : null;
+  wrap.replaceChildren(
+    el("div.section-h", {}, el("h2", {}, "Due this month"),
+      el("span.small.faint", {}, todo.length ? `${todo.length} to log · ${money(todo.reduce((a, b) => a + b.amount_cents, 0))}` : d.due.length ? "All logged" : "")),
+    el("div.card.due", {},
+      todo.length ? todo.slice(0, SHOW).map(row) : d.due.length ? el("div.empty", {}, "Every bill due this month is logged or skipped.") : null,
+      moreList, doneList,
+      more || toggle || needs ? el("div.due-foot", {}, el("div.actions", { style: "gap:14px" }, more, toggle), needs) : null));
+}
+
+async function skipBill(b, ym, skip) {
+  try { await api("POST", `/api/bills/${b.id}/skip`, { ym, skip }); toast(skip ? `${b.name} skipped this month` : "Back on the list"); render(); }
+  catch (x) { toast(x.message, true); }
+}
+
+function logBillDialog(b, ym) {
+  const amount = el("input.input.num", { value: centsToInput(b.amount_cents), inputmode: "decimal", required: true });
+  const date = el("input.input", { type: "date", value: b.due_date, min: `${ym}-01`, max: `${ym}-31` });
+  const cat = el("select.input", { required: true }, el("option", { value: "" }, "Pick a category"),
+    S.categories.filter((c) => !c.archived).map((c) => el("option", { value: c.id }, c.name)));
+  cat.value = b.category_id ?? "";
+  const close = modal(`Log ${b.name}`, el("form.form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const v = parseMoney(amount.value);
+      if (v === null || v <= 0) return toast("Enter the amount you paid", true);
+      if (!cat.value) return toast("Pick a category", true);
+      try {
+        await api("POST", `/api/bills/${b.id}/log`, { ym, amount_cents: v, date: date.value || null, category_id: +cat.value });
+        close(); toast(`${b.name} logged`); render();
+      } catch (x) { toast(x.message, true); }
+    },
+  },
+    el("p.muted", { style: "margin:0" }, "Adds it as spending in ", el("strong", {}, ymLabel(ym)), ". Change the amount if this month's bill was different."),
+    el("div.row2", {}, el("div.field", {}, el("label", {}, "Amount"), amount), el("div.field", {}, el("label", {}, "Date"), date)),
+    el("div.field", {}, el("label", {}, "Category"), cat),
+    el("div.actions", {}, el("button.btn", { type: "button", onclick: () => close() }, "Cancel"), el("button.btn.primary", { type: "submit" }, "Log it"))));
+  amount.select();
 }
 
 // ------------------------------------------------------------------ month view
@@ -1537,11 +1610,19 @@ async function settingsBills(body) {
         el("thead", {}, el("tr", {}, el("th", {}, "Bill"), el("th.r", {}, "Amount"), el("th.r", {}, "Per month"))),
         el("tbody", {}, list.length ? list.map((b) => el("tr.click", { onclick: () => billDialog(b), style: b.active ? null : "opacity:.5" },
           el("td", {}, b.name, el("div.small.faint", {},
-            [b.frequency, b.renews && `renews ${b.renews}`, b.notes, !b.active && "inactive"].filter(Boolean).join(" · "))),
+            [b.frequency, dueLabel(b), b.renews && `renews ${b.renews}`, b.notes, !b.active && "inactive"].filter(Boolean).join(" · "))),
           el("td.r", {}, moneyEl(b.amount_cents)),
           el("td.r", {}, moneyEl(Math.round(perMonth(b)))))) : el("tr", {}, el("td.faint", { colspan: 3 }, "No bills"))))));
   }
   body.append(el("div.actions", { style: "margin-top:12px" }, el("button.btn.primary", { onclick: () => billDialog() }, "Add bill")));
+}
+
+function dueLabel(b) {
+  const day = b.due_day ? `the ${ordinal(b.due_day)}` : null;
+  if (b.frequency === "monthly") return day ? `due ${day}` : null;
+  if (!b.due_month) return "set a due month";
+  const mon = MONTH_NAMES[b.due_month - 1].slice(0, 3);
+  return b.frequency === "quarterly" ? `due every 3 months from ${mon}${day ? ", " + day : ""}` : `due ${mon}${day ? " " + b.due_day : ""}`;
 }
 
 function billDialog(b) {
@@ -1550,6 +1631,13 @@ function billDialog(b) {
   const freq = el("select.input", {}, ["monthly", "quarterly", "yearly"].map((f) => el("option", { value: f }, f)));
   freq.value = b?.frequency || "monthly";
   const renews = el("input.input", { value: b?.renews || "", maxlength: 40, placeholder: "e.g. Dec" });
+  const dueDay = el("input.input.num", { type: "number", min: 1, max: 31, value: b?.due_day ?? "", placeholder: "e.g. 15", inputmode: "numeric" });
+  const dueMonth = el("select.input", {}, el("option", { value: "" }, "—"), MONTH_NAMES.map((n, i) => el("option", { value: i + 1 }, n)));
+  dueMonth.value = b?.due_month ?? "";
+  const monthLabel = el("label", {}, "Due in");
+  const monthField = el("div.field", {}, monthLabel, dueMonth);
+  const syncMonth = () => { monthField.hidden = freq.value === "monthly"; monthLabel.textContent = freq.value === "quarterly" ? "One month it's due in" : "Due in"; };
+  freq.addEventListener("change", syncMonth); syncMonth();
   const cat = el("select.input", {}, el("option", { value: "" }, "—"), S.categories.filter((c) => !c.archived).map((c) => el("option", { value: c.id }, c.name + (c.budget_from_bills ? " (from bills)" : ""))));
   cat.value = b?.category_id ?? S.categories.find((c) => c.budget_from_bills)?.id ?? "";
   const notes = el("input.input", { value: b?.notes || "", maxlength: 500 });
@@ -1559,7 +1647,10 @@ function billDialog(b) {
       e.preventDefault();
       const v = parseMoney(amount.value);
       if (!name.value.trim() || v === null || v < 0) return toast("Enter a name and amount", true);
-      const payload = { name: name.value, amount_cents: v, frequency: freq.value, renews: renews.value, category_id: cat.value ? +cat.value : null, notes: notes.value, active: active.checked };
+      const day = dueDay.value ? +dueDay.value : null;
+      if (day !== null && !(day >= 1 && day <= 31)) return toast("Due day is 1 to 31", true);
+      const payload = { name: name.value, amount_cents: v, frequency: freq.value, renews: renews.value, category_id: cat.value ? +cat.value : null, notes: notes.value, active: active.checked,
+        due_day: day, due_month: freq.value !== "monthly" && dueMonth.value ? +dueMonth.value : null };
       try {
         if (b) await api("PUT", `/api/bills/${b.id}`, payload); else await api("POST", "/api/bills", payload);
         close(); toast("Saved"); render();
@@ -1568,7 +1659,8 @@ function billDialog(b) {
   },
     el("div.field", {}, el("label", {}, "Name"), name),
     el("div.row2", {}, el("div.field", {}, el("label", {}, "Amount"), amount), el("div.field", {}, el("label", {}, "Every"), freq)),
-    el("div.row2", {}, el("div.field", {}, el("label", {}, "Renews"), renews), el("div.field", {}, el("label", {}, "Category"), cat)),
+    el("div.row2", {}, el("div.field", {}, el("label", {}, "Due day"), dueDay), monthField),
+    el("div.row2", {}, el("div.field", {}, el("label", {}, "Renewal note"), renews), el("div.field", {}, el("label", {}, "Category"), cat)),
     el("div.field", {}, el("label", {}, "Notes"), notes),
     el("label.check", {}, active, "Active (counts toward the budget)"),
     el("div.actions", {},

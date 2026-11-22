@@ -37,6 +37,8 @@ the month, and whatever's left in a tab stays there for later.
   month's budget never rewrites history. Leave a month open until everything posts, or close it early.
 - **Move money between envelopes** when one runs short, and **add money** for gifts and refunds.
 - **Bills drive budgets:** monthly, quarterly and yearly subscriptions roll up into a monthly amount.
+- **Due this month:** bills show up on the dashboard when they're due; one tap logs them (amount
+  editable for bills that vary), or skip a month.
 
 **Entering spending**
 - **Quick add** with autocomplete: type "costco" and the category fills itself in.
@@ -195,7 +197,6 @@ python -m venv .venv
 
 ## Roadmap
 
-- Recurring entries (bills that are due this month, one tap to log)
 - Custom category groups and more languages
 - Restore a downloaded backup from inside the app
 - Bank sync via SimpleFIN

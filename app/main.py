@@ -1290,6 +1290,8 @@ class BillIn(BaseModel):
     category_id: int | None = None
     notes: str = Field("", max_length=500)
     active: bool = True
+    due_day: int | None = Field(None, ge=1, le=31)
+    due_month: int | None = Field(None, ge=1, le=12)
 
 
 @app.get("/api/bills")
@@ -1302,8 +1304,10 @@ def bills(user=Depends(current_user), conn=Depends(db)):
 def add_bill(body: BillIn, user=Depends(current_user), conn=Depends(db)):
     with core.tx(conn):
         bid = conn.execute(
-            "INSERT INTO bills(name, amount_cents, frequency, renews, category_id, notes, active) VALUES (?,?,?,?,?,?,?)",
-            (body.name, body.amount_cents, body.frequency, body.renews, body.category_id, body.notes, int(body.active)),
+            "INSERT INTO bills(name, amount_cents, frequency, renews, category_id, notes, active, due_day, due_month) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (body.name, body.amount_cents, body.frequency, body.renews, body.category_id, body.notes, int(body.active),
+             body.due_day, body.due_month if body.frequency != "monthly" else None),
         ).lastrowid
         core.refresh_bill_budgets(conn)
     return {"id": bid}
@@ -1313,8 +1317,10 @@ def add_bill(body: BillIn, user=Depends(current_user), conn=Depends(db)):
 def edit_bill(bid: int, body: BillIn, user=Depends(current_user), conn=Depends(db)):
     with core.tx(conn):
         conn.execute(
-            "UPDATE bills SET name=?, amount_cents=?, frequency=?, renews=?, category_id=?, notes=?, active=? WHERE id=?",
-            (body.name, body.amount_cents, body.frequency, body.renews, body.category_id, body.notes, int(body.active), bid))
+            "UPDATE bills SET name=?, amount_cents=?, frequency=?, renews=?, category_id=?, notes=?, active=?, due_day=?, due_month=? "
+            "WHERE id=?",
+            (body.name, body.amount_cents, body.frequency, body.renews, body.category_id, body.notes, int(body.active),
+             body.due_day, body.due_month if body.frequency != "monthly" else None, bid))
         core.refresh_bill_budgets(conn)
     return {"ok": True}
 
@@ -1324,6 +1330,45 @@ def delete_bill(bid: int, user=Depends(current_user), conn=Depends(db)):
     with core.tx(conn):
         conn.execute("DELETE FROM bills WHERE id=?", (bid,))
         core.refresh_bill_budgets(conn)
+    return {"ok": True}
+
+
+@app.get("/api/bills/due")
+def bills_due(ym: str, user=Depends(current_user), conn=Depends(db)):
+    return core.bills_due(conn, core.valid_ym(ym))
+
+
+class BillLog(BaseModel):
+    ym: str = Field(max_length=7)
+    amount_cents: int = Field(gt=0, lt=10**10)
+    date: str | None = Field(None, max_length=10)
+    category_id: int | None = None
+
+
+@app.post("/api/bills/{bid}/log")
+def log_bill(bid: int, body: BillLog, user=Depends(current_user), conn=Depends(db)):
+    with core.tx(conn):
+        tx_id = core.log_bill(conn, bid, ym=core.valid_ym(body.ym), amount_cents=body.amount_cents,
+                              date=body.date or None, category_id=body.category_id, user_id=user["id"])
+    return {"id": tx_id}
+
+
+class BillSkip(BaseModel):
+    ym: str = Field(max_length=7)
+    skip: bool = True
+
+
+@app.post("/api/bills/{bid}/skip")
+def skip_bill(bid: int, body: BillSkip, user=Depends(current_user), conn=Depends(db)):
+    ym = core.valid_ym(body.ym)
+    with core.tx(conn):
+        core.require_open(conn, ym)
+        if not conn.execute("SELECT 1 FROM bills WHERE id=?", (bid,)).fetchone():
+            raise core.BudgetError("That bill no longer exists")
+        if body.skip:
+            conn.execute("INSERT OR IGNORE INTO bill_skips(bill_id, ym) VALUES (?,?)", (bid, ym))
+        else:
+            conn.execute("DELETE FROM bill_skips WHERE bill_id=? AND ym=?", (bid, ym))
     return {"ok": True}
 
 

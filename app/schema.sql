@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     entered_by   INTEGER REFERENCES users(id),
     source       TEXT NOT NULL DEFAULT 'app',         -- app / sheet / csv
     sort         INTEGER NOT NULL DEFAULT 0,
+    bill_id      INTEGER REFERENCES bills(id) ON DELETE SET NULL,  -- logged from the bills' due list
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
     CHECK ((ym IS NULL) = (category_id IS NULL)),
@@ -95,7 +96,16 @@ CREATE TABLE IF NOT EXISTS bills (
     renews       TEXT NOT NULL DEFAULT '',     -- free text, e.g. 'Dec' or 'aug 31st'
     category_id  INTEGER REFERENCES categories(id),
     notes        TEXT NOT NULL DEFAULT '',
-    active       INTEGER NOT NULL DEFAULT 1
+    active       INTEGER NOT NULL DEFAULT 1,
+    due_day      INTEGER CHECK (due_day BETWEEN 1 AND 31),    -- day of the month it's paid (optional)
+    due_month    INTEGER CHECK (due_month BETWEEN 1 AND 12)   -- quarterly/yearly: a month it's due in
+);
+
+-- "Not paying this one this month": hides a bill from the month's due list.
+CREATE TABLE IF NOT EXISTS bill_skips (
+    bill_id  INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
+    ym       TEXT NOT NULL,
+    PRIMARY KEY (bill_id, ym)
 );
 
 CREATE TABLE IF NOT EXISTS income (

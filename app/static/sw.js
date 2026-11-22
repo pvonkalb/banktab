@@ -1,6 +1,6 @@
 // Caches the app shell so it opens instantly. Budget data (/api/) is never cached.
-const VERSION = "banktab-v11";
-const SHELL = ["/", "/static/styles.css?v=8", "/static/app.js?v=8", "/static/theme.js?v=6", "/static/icon.svg?v=2", "/manifest.webmanifest"];
+const VERSION = "banktab-v12";
+const SHELL = ["/", "/static/styles.css?v=9", "/static/app.js?v=9", "/static/theme.js?v=6", "/static/icon.svg?v=2", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
