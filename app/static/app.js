@@ -126,7 +126,7 @@ async function api(method, path, body) {
     opts.body = JSON.stringify(body);
   }
   const r = await fetch(path, opts);
-  if (r.status === 401 && path !== "/api/login") {
+  if (r.status === 401 && !path.startsWith("/api/login")) {  // a wrong password or code is just an error message
     S = null;
     if (!isPublicRoute()) renderLogin();
     throw new Error("Please log in");
@@ -264,13 +264,32 @@ async function renderLogin() {
   const pass = input({ type: "password", autocomplete: "current-password" });
   authPage("Log in", null,
     authForm([field("Email or username", user), field("Password", pass)], "Log in", async () => {
-      try { await api("POST", "/api/login", { username: user.value, password: pass.value }); }
+      let r;
+      try { r = await api("POST", "/api/login", { username: user.value, password: pass.value }); }
       catch (x) { pass.select(); throw x; }
+      if (r.twofa) return renderSecondStep(r.ticket);
       afterLogin();
     }),
     el("div.login-links", {},
       el("a", { href: "#/forgot" }, "Forgot password?"),
       cfg.signup ? el("a", { href: "#/signup" }, "Create an account") : null));
+}
+
+// Second step of logging in: the 6-digit code from the authenticator app, or a recovery code.
+function renderSecondStep(ticket) {
+  const code = input({ autocomplete: "one-time-code", inputmode: "numeric", autocapitalize: "none", maxlength: 40, placeholder: "123456" });
+  authPage("Enter your code", "Open your authenticator app and type the 6-digit code for Banktab.",
+    authForm([field("Code", code, "Lost your phone? Type one of your recovery codes instead.")], "Continue", async () => {
+      let r;
+      try { r = await api("POST", "/api/login/2fa", { ticket, code: code.value }); }
+      catch (x) {
+        if (/Log in again|too long/.test(x.message)) { toast(x.message, true); return renderLogin(); }
+        code.select(); throw x;
+      }
+      if (r.recovery_left !== undefined) toast(`Recovery code used. ${r.recovery_left} left. Make new ones in Settings → Account.`, r.recovery_left < 3);
+      afterLogin();
+    }),
+    el("div.login-links", {}, el("a", { href: "#/login", onclick: (e) => { e.preventDefault(); renderLogin(); } }, "Back to log in")));
 }
 
 function renderFirstRun() {
@@ -322,9 +341,9 @@ function checkEmailPage(email, what) {
 async function renderVerify(params) {
   authPage("Confirming your email…", null);
   try {
-    await api("POST", "/api/verify", { token: params.get("token") || "" });
-    toast("Email confirmed");
-    location.hash = "#/dash";
+    const r = await api("POST", "/api/verify", { token: params.get("token") || "" });
+    toast(r.login ? "Email confirmed. Log in to continue." : "Email confirmed");
+    location.hash = r.login ? "#/login" : "#/dash";
   } catch (x) {
     authPage("That link didn't work", x.message, el("a.btn.block", { href: "#/login" }, "Log in to get a new link"));
   }
@@ -344,9 +363,9 @@ function renderReset(params) {
   const pass = input({ type: "password", autocomplete: "new-password", minlength: 10 });
   authPage("Choose a new password", "This signs you out everywhere else.",
     authForm([field("New password", pass, "At least 10 characters.")], "Save password", async () => {
-      await api("POST", "/api/reset", { token: params.get("token") || "", password: pass.value });
-      toast("Password changed");
-      location.hash = "#/dash";
+      const r = await api("POST", "/api/reset", { token: params.get("token") || "", password: pass.value });
+      toast(r.login ? "Password changed. Log in with it and your code." : "Password changed");
+      location.hash = r.login ? "#/login" : "#/dash";
     }));
 }
 
@@ -1741,6 +1760,7 @@ function settingsAccount(body) {
       el("h2.card-title", {}, "Change password"),
       el("div.row2", {}, el("div.field", {}, el("label", {}, "Current"), cur), el("div.field", {}, el("label", {}, "New (10+ characters)"), nw)),
       el("div.actions", {}, el("button.btn.primary", { type: "submit" }, "Change password"))),
+    twofaCard(),
     el("div.card.pad.form", { style: "max-width:520px" },
       el("div.actions", {},
         el("a.btn", { href: "/api/export.csv" }, "Download all entries (CSV)"),
@@ -1755,6 +1775,103 @@ function settingsAccount(body) {
       el("a", { href: "https://www.gnu.org/licenses/agpl-3.0.html", target: "_blank", rel: "noopener noreferrer" }, "AGPL-3.0"),
       CONFIG.source ? [" · ", el("a", { href: CONFIG.source, target: "_blank", rel: "noopener noreferrer" }, "Source code")] : "");
   });
+}
+
+// ------------------------------------------------------------------ two-step login (settings)
+
+function twofaCard() {
+  const card = el("div.card.pad.form", { style: "max-width:520px;margin-bottom:14px" }, el("h2.card-title", {}, "Two-step login"), el("p.faint.small", {}, "Loading…"));
+  api("GET", "/api/account/2fa").then((st) => {
+    const why = el("p.muted", { style: "margin:0" }, "After your password, Banktab also asks for a 6-digit code from an authenticator app on your phone (Google Authenticator, Microsoft Authenticator, Proton Pass, 1Password and others), so a leaked password alone isn't enough.");
+    if (!st.on) {
+      card.replaceChildren(el("h2.card-title", {}, "Two-step login"), why,
+        el("div.actions", {}, el("button.btn.primary", { type: "button", onclick: twofaSetupDialog }, "Turn on")));
+      return;
+    }
+    card.replaceChildren(el("h2.card-title", {}, "Two-step login ", el("span.pill.open", {}, "On")),
+      el("p.muted", { style: "margin:0" }, `On since ${dateLabel(st.since.slice(0, 10))}. `,
+        el("span", { class: st.recovery_left < 3 ? "warn-text" : null }, `${st.recovery_left} recovery code${st.recovery_left === 1 ? "" : "s"} left.`)),
+      el("div.actions", {},
+        el("button.btn", { type: "button", onclick: () => twofaConfirmDialog("new") }, "New recovery codes"),
+        el("button.btn.danger", { type: "button", onclick: () => twofaConfirmDialog("off") }, "Turn off")));
+  }).catch((x) => card.replaceChildren(el("p.err", {}, x.message)));
+  return card;
+}
+
+function twofaSetupDialog() {
+  const pw = el("input.input", { type: "password", autocomplete: "current-password", required: true });
+  const body = el("div", {});
+  const close = modal("Turn on two-step login", body);
+  // Step 1: password
+  body.append(el("form.form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      let r;
+      try { r = await api("POST", "/api/account/2fa/start", { password: pw.value }); } catch (x) { return toast(x.message, true); }
+      scanStep(r);
+    },
+  }, el("p.muted", { style: "margin:0" }, "Enter your password to start."),
+    el("div.field", {}, el("label", {}, "Password"), pw),
+    el("div.actions", {}, el("button.btn", { type: "button", onclick: () => close() }, "Cancel"), el("button.btn.primary", { type: "submit" }, "Next"))));
+  pw.focus();
+
+  // Step 2: scan and confirm
+  function scanStep(r) {
+    const code = el("input.input.num", { autocomplete: "one-time-code", inputmode: "numeric", maxlength: 8, placeholder: "123456", required: true });
+    const key = r.secret.match(/.{1,4}/g).join(" ");
+    body.replaceChildren(el("form.form", {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        let out;
+        try { out = await api("POST", "/api/account/2fa/enable", { code: code.value }); } catch (x) { code.select(); return toast(x.message, true); }
+        showCodes(out.recovery_codes, "Two-step login is on");
+      },
+    },
+      el("p.muted", { style: "margin:0" }, "1. In your authenticator app, add an account and scan this code."),
+      el("div.qr", {}, el("img", { src: r.qr, alt: "QR code for your authenticator app", width: 200, height: 200 })),
+      el("p.small.faint", { style: "margin:0" }, "Can't scan? Choose “enter a setup key” and type: ", el("code.key", {}, key)),
+      el("p.muted", { style: "margin:0" }, "2. Type the 6-digit code the app shows for Banktab."),
+      el("div.field", {}, el("label", {}, "Code"), code),
+      el("div.actions", {}, el("button.btn", { type: "button", onclick: () => close() }, "Cancel"), el("button.btn.primary", { type: "submit" }, "Turn on"))));
+    code.focus();
+  }
+
+  function showCodes(codes, title) { close(); recoveryCodesDialog(codes, title); }
+}
+
+function recoveryCodesDialog(codes, title) {
+  const text = `Banktab recovery codes (each works once)\n\n${codes.join("\n")}\n`;
+  const close = modal(title, el("div.form", {},
+    el("p.muted", { style: "margin:0" }, "Save these recovery codes somewhere safe, like your password manager. If you lose your phone, each one lets you log in once. They won't be shown again."),
+    el("ol.codes", {}, codes.map((c) => el("li", {}, el("code", {}, c)))),
+    el("div.actions", {},
+      el("button.btn", { type: "button", onclick: async () => { try { await navigator.clipboard.writeText(text); toast("Copied"); } catch { toast("Couldn't copy; select them instead", true); } } }, "Copy"),
+      el("button.btn", { type: "button", onclick: () => {
+        const a = el("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: "banktab-recovery-codes.txt" });
+        document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } }, "Download"),
+      el("button.btn.primary", { type: "button", onclick: () => close() }, "I saved them"))), { onClose: () => render() });
+}
+
+function twofaConfirmDialog(what) {
+  const pw = el("input.input", { type: "password", autocomplete: "current-password", required: true });
+  const code = el("input.input", { autocomplete: "one-time-code", autocapitalize: "none", maxlength: 40, required: true, placeholder: "123456" });
+  const off = what === "off";
+  const close = modal(off ? "Turn off two-step login?" : "Make new recovery codes", el("form.form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        if (off) { await api("POST", "/api/account/2fa/disable", { password: pw.value, code: code.value }); close(); toast("Two-step login is off"); render(); }
+        else { const r = await api("POST", "/api/account/2fa/recovery-codes", { password: pw.value, code: code.value }); close(); recoveryCodesDialog(r.recovery_codes, "New recovery codes"); }
+      } catch (x) { toast(x.message, true); }
+    },
+  },
+    el("p.muted", { style: "margin:0" }, off ? "Logging in will only need your password again." : "Your old recovery codes stop working."),
+    el("div.field", {}, el("label", {}, "Password"), pw),
+    el("div.field", {}, el("label", {}, "Code from your app (or a recovery code)"), code),
+    el("div.actions", {}, el("button.btn", { type: "button", onclick: () => close() }, "Cancel"),
+      el("button.btn" + (off ? ".danger" : ".primary"), { type: "submit" }, off ? "Turn off" : "Make new codes"))));
+  pw.focus();
 }
 
 // ------------------------------------------------------------------ bank CSV import

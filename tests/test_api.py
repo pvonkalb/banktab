@@ -241,3 +241,103 @@ def test_goal_columns_added_to_older_databases(tmp_path):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(categories)")}
     assert {"goal_cents", "goal_ym"} <= cols
     conn.close()
+
+
+# ---------------------------------------------------------------- two-step login
+
+from app import totp  # noqa: E402
+
+PW = "correct horse battery"
+
+
+def _turn_on_2fa(c):
+    assert c.post("/api/account/2fa/start", headers=H, json={"password": "wrong"}).status_code == 400
+    r = c.post("/api/account/2fa/start", headers=H, json={"password": PW}).json()
+    assert r["qr"].startswith("data:image/svg+xml") and r["uri"].startswith("otpauth://totp/Banktab%3Asam?")
+    secret = r["secret"]
+    assert c.post("/api/account/2fa/enable", headers=H, json={"code": "000000"}).status_code == 400
+    step = totp.current_step()
+    codes = c.post("/api/account/2fa/enable", headers=H, json={"code": totp.code_at(secret, step)}).json()["recovery_codes"]
+    assert len(codes) == 10 and len(set(codes)) == 10
+    return secret, step, codes
+
+
+def test_two_step_login(client):
+    login(client)
+    other = TestClient(main.app)
+    login(other)  # a second device, signed in before 2FA was turned on
+    secret, step, codes = _turn_on_2fa(client)
+    assert client.get("/api/state").json()["user"]["twofa"] is True
+    assert other.get("/api/state").status_code == 401           # other devices were signed out
+    assert client.get("/api/account/2fa").json()["recovery_left"] == 10
+
+    # password alone no longer logs in
+    fresh = TestClient(main.app)
+    r = fresh.post("/api/login", headers=H, json={"username": "sam", "password": PW}).json()
+    assert r["twofa"] is True and "ticket" in r
+    assert fresh.get("/api/state").status_code == 401
+    # the code used to turn it on can't be replayed
+    bad = fresh.post("/api/login/2fa", headers=H, json={"ticket": r["ticket"], "code": totp.code_at(secret, step)})
+    assert bad.status_code == 401
+    ok = fresh.post("/api/login/2fa", headers=H, json={"ticket": r["ticket"], "code": totp.code_at(secret, step + 1)})
+    assert ok.status_code == 200 and fresh.get("/api/state").status_code == 200
+    # a ticket works once
+    assert fresh.post("/api/login/2fa", headers=H, json={"ticket": r["ticket"], "code": "123456"}).status_code == 401
+
+    # recovery codes: any formatting, one use each
+    c2 = TestClient(main.app)
+    t = c2.post("/api/login", headers=H, json={"username": "sam", "password": PW}).json()["ticket"]
+    r = c2.post("/api/login/2fa", headers=H, json={"ticket": t, "code": " " + codes[0].upper().replace("-", " ") + " "})
+    assert r.status_code == 200 and r.json()["recovery_left"] == 9
+    c3 = TestClient(main.app)
+    t = c3.post("/api/login", headers=H, json={"username": "sam", "password": PW}).json()["ticket"]
+    assert c3.post("/api/login/2fa", headers=H, json={"ticket": t, "code": codes[0]}).status_code == 401
+
+
+def test_two_step_wrong_codes_end_the_attempt(client):
+    login(client)
+    _turn_on_2fa(client)
+    c = TestClient(main.app)
+    t = c.post("/api/login", headers=H, json={"username": "sam", "password": PW}).json()["ticket"]
+    for i in range(4):
+        r = c.post("/api/login/2fa", headers=H, json={"ticket": t, "code": "000000"})
+        assert r.status_code == 401 and "isn't right" in r.json()["detail"]
+    r = c.post("/api/login/2fa", headers=H, json={"ticket": t, "code": "000000"})
+    assert "Log in again" in r.json()["detail"]
+    assert c.post("/api/login/2fa", headers=H, json={"ticket": t, "code": "000000"}).json()["detail"].startswith("That took too long")
+
+
+def test_reset_link_does_not_skip_two_step(client, tmp_path):
+    login(client)
+    _turn_on_2fa(client)
+    conn = accounts.open_accounts(tmp_path)
+    uid = conn.execute("SELECT id FROM users WHERE username='sam'").fetchone()[0]
+    token = accounts.make_token(conn, "reset", user_id=uid)
+    conn.close()
+    c = TestClient(main.app)
+    r = c.post("/api/reset", headers=H, json={"token": token, "password": "a brand new passphrase"})
+    assert r.json() == {"ok": True, "login": True}
+    assert c.get("/api/state").status_code == 401
+    assert c.post("/api/login", headers=H, json={"username": "sam", "password": "a brand new passphrase"}).json()["twofa"] is True
+
+
+def test_turn_off_and_new_codes_need_password_and_code(client):
+    login(client)
+    secret, step, codes = _turn_on_2fa(client)
+    assert client.post("/api/account/2fa/disable", headers=H, json={"password": PW, "code": "000000"}).status_code == 400
+    assert client.post("/api/account/2fa/disable", headers=H, json={"password": "nope", "code": codes[1]}).status_code == 400
+    new = client.post("/api/account/2fa/recovery-codes", headers=H, json={"password": PW, "code": codes[1]}).json()["recovery_codes"]
+    assert len(new) == 10 and codes[2] not in new
+    assert client.post("/api/account/2fa/disable", headers=H, json={"password": PW, "code": codes[2]}).status_code == 400  # old set is gone
+    assert client.post("/api/account/2fa/disable", headers=H, json={"password": PW, "code": new[0]}).status_code == 200
+    assert client.get("/api/state").json()["user"]["twofa"] is False
+    assert client.post("/api/login", headers=H, json={"username": "sam", "password": PW}).json() == {"ok": True}
+
+
+def test_totp_rfc6238_vectors():
+    import base64
+    s = base64.b32encode(b"12345678901234567890").decode().rstrip("=")
+    for t, want in ((59, "287082"), (1111111109, "081804"), (1234567890, "005924"), (2000000000, "279037")):
+        assert totp.code_at(s, t // 30) == want
+        assert totp.verify(s, want, now=t) == t // 30
+        assert totp.verify(s, want, now=t, last_step=t // 30) is None

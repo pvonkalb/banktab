@@ -25,9 +25,27 @@ CREATE TABLE IF NOT EXISTS users (
     role              TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
     theme             TEXT NOT NULL DEFAULT 'bank',           -- system / light / dark / noir / paper / bank
     accent            TEXT NOT NULL DEFAULT 'gold',
+    totp_secret       TEXT,                                   -- two-step login secret (set while turning it on)
+    totp_on_at        TEXT,                                   -- when two-step login was turned on; NULL = off
+    totp_last_step    INTEGER,                                -- last code step used, so codes can't be replayed
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_users_household ON users(household_id);
+
+-- Password was right, waiting for the two-step code. Short-lived, stored hashed.
+CREATE TABLE IF NOT EXISTS login_challenges (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tries       INTEGER NOT NULL DEFAULT 0,
+    expires_at  TEXT NOT NULL
+);
+
+-- One-time recovery codes for two-step login, stored hashed.
+CREATE TABLE IF NOT EXISTS recovery_codes (
+    code_hash  TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    used_at    TEXT
+);
 
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash  TEXT PRIMARY KEY,

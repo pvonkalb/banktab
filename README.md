@@ -47,6 +47,8 @@ the month, and whatever's left in a tab stays there for later.
 
 **Seeing where it went**
 - **Dashboard** with every envelope's budget, spending and balance in one table.
+- **Savings goals:** give a category a target ("$3,000 by June") and see progress, what's left,
+  and the monthly amount needed to get there on time.
 - **Reports** by month, quarter or year: trends against budget, by group and category,
   versus the previous period and the same period last year.
 - **Trackers** for taxes and projects: tag house repairs or medical bills, get yearly totals and
@@ -55,6 +57,7 @@ the month, and whatever's left in a tab stays there for later.
 **Households**
 - Several households per server, **each in its own database file**.
 - Invite a partner by link; owners and members; sign-up with email confirmation; password reset.
+- Optional **two-step login** with any authenticator app, plus one-time recovery codes.
 - Six themes (Bank, the default: dark wood and gold; Match device, Light, Dark, Noir and Paper) and eight accent colors, per person.
 - Installable on a phone (PWA), currency per household, CSV export and full-backup download.
 
@@ -122,6 +125,8 @@ Browser (plain JS, no build step)  ──HTTPS──▶  FastAPI  ──▶  dat
 Built to be exposed to the internet by someone who isn't a security expert:
 
 - A fresh install can only be claimed with a **one-time setup code** printed in the server log.
+- Optional **two-step login** (TOTP, RFC 6238): codes can't be replayed, wrong codes are rate-limited,
+  recovery codes are stored hashed, and email links (reset, confirm) never skip the second step.
 - Passwords hashed with **scrypt**. Sessions are random tokens **stored hashed**, in HttpOnly,
   SameSite=Strict cookies that become HTTPS-only automatically over HTTPS.
 - **Rate limits** per IP, per account (across any number of IPs), on sign-ups, resets and invites.
@@ -134,7 +139,7 @@ Built to be exposed to the internet by someone who isn't a security expert:
   scripts, fonts, analytics or trackers.
 - CSV exports are **safe to open in Excel** (formula injection neutralized).
 - The Docker image runs as a **non-root user on a read-only filesystem** with no Linux capabilities.
-- CI runs the test suite (34 tests, including cross-household isolation), `pip-audit` and a Docker build.
+- CI runs the test suite (40+ tests, including cross-household isolation), `pip-audit` and a Docker build.
 
 Found a problem? See [SECURITY.md](SECURITY.md).
 
@@ -161,6 +166,7 @@ python tools/manage.py households | users                   # list
 python tools/manage.py create-household "The Smiths"
 python tools/manage.py adduser sam "Sam" 1 [--member] [--email sam@example.com]
 python tools/manage.py passwd sam
+python tools/manage.py disable-2fa sam                      # lost phone and recovery codes
 python tools/manage.py delete-household 2
 python tools/backup.py                                      # one-off backup of everything
 python tools/demo.py --data demo-data                       # made-up demo household
@@ -189,8 +195,7 @@ python -m venv .venv
 
 ## Roadmap
 
-- Two-step login (TOTP)
-- Recurring entries and savings goals ("$5,000 by June")
+- Recurring entries (bills that are due this month, one tap to log)
 - Custom category groups and more languages
 - Restore a downloaded backup from inside the app
 - Bank sync via SimpleFIN

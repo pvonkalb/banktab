@@ -59,7 +59,8 @@ def open_accounts(data_dir: Path) -> sqlite3.Connection:
 def _ensure_columns(conn) -> None:
     """Columns added after the first release."""
     add = {"households": [("currency", "TEXT NOT NULL DEFAULT 'USD'")],
-           "users": [("theme", f"TEXT NOT NULL DEFAULT '{DEFAULT_THEME}'"), ("accent", f"TEXT NOT NULL DEFAULT '{DEFAULT_ACCENT}'")]}
+           "users": [("theme", f"TEXT NOT NULL DEFAULT '{DEFAULT_THEME}'"), ("accent", f"TEXT NOT NULL DEFAULT '{DEFAULT_ACCENT}'"),
+                     ("totp_secret", "TEXT"), ("totp_on_at", "TEXT"), ("totp_last_step", "INTEGER")]}
     for table, cols in add.items():
         have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, decl in cols:

@@ -6,6 +6,7 @@
     python tools/manage.py migrate-legacy <old-budget.db> "<Name>"    # pre-households database
     python tools/manage.py adduser <username> "<Display Name>" <household id> [--member] [--email you@x.com]
     python tools/manage.py passwd <username>
+    python tools/manage.py disable-2fa <username>                    # lost phone AND recovery codes
     python tools/manage.py users
     python tools/manage.py logout-all
     python tools/manage.py delete-household <id>
@@ -92,6 +93,12 @@ def main(argv: list[str]) -> None:
                          (accounts.hash_password(ask_password()), args[0], args[0])).rowcount
         conn.execute("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE username=? OR email=?)", (args[0], args[0]))
         print("Password changed, sessions signed out" if n else f"No user {args[0]}")
+    elif cmd == "disable-2fa" and len(args) == 1:
+        n = conn.execute("UPDATE users SET totp_secret=NULL, totp_on_at=NULL, totp_last_step=NULL WHERE username=? OR email=?",
+                         (args[0], args[0])).rowcount
+        conn.execute("DELETE FROM recovery_codes WHERE user_id IN (SELECT id FROM users WHERE username=? OR email=?)", (args[0], args[0]))
+        conn.execute("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE username=? OR email=?)", (args[0], args[0]))
+        print(f"Two-step login turned off for {args[0]}; they can turn it on again in Settings" if n else f"No user {args[0]}")
     elif cmd == "users":
         for r in conn.execute("""SELECT u.username, u.display_name, u.role, u.email, u.email_verified_at, h.id AS hid, h.name
                                  FROM users u JOIN households h ON h.id = u.household_id ORDER BY h.id, u.id"""):

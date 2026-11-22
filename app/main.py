@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import accounts, core
+from . import accounts, core, totp
 from .accounts import check_password, hash_password, sha
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -172,7 +172,7 @@ _DUMMY_HASH = hash_password(secrets.token_hex(8))
 # ---------------------------------------------------------------- sessions
 
 USER_SQL = """SELECT u.id, u.username, u.email, u.email_verified_at, u.display_name, u.household_id, u.role,
-                     u.theme, u.accent, h.name AS household_name, h.setup_done, h.currency
+                     u.theme, u.accent, u.totp_on_at, h.name AS household_name, h.setup_done, h.currency
               FROM users u JOIN households h ON h.id = u.household_id"""
 
 
@@ -318,8 +318,101 @@ def login(body: Login, request: Request, response: Response, conn=Depends(acct))
             _hit(f"resend|{row['id']}")
             _send_verify(conn, request, row["id"], row["email"])
         raise HTTPException(403, "Please confirm your email first. We just sent you a new link.")
+    if _twofa_on(conn, row["id"]):
+        # Right password; the session only starts after the code (POST /api/login/2fa).
+        return {"twofa": True, "ticket": _new_challenge(conn, row["id"])}
     _start_session(conn, row["id"], response, request)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- two-step login
+
+CHALLENGE_MINUTES = 5
+CHALLENGE_TRIES = 5
+
+
+def _twofa_on(conn, user_id: int) -> bool:
+    row = conn.execute("SELECT totp_on_at FROM users WHERE id=?", (user_id,)).fetchone()
+    return bool(row and row["totp_on_at"])
+
+
+def _new_challenge(conn, user_id: int) -> str:
+    raw = secrets.token_urlsafe(32)
+    expires = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=CHALLENGE_MINUTES)
+    conn.execute("DELETE FROM login_challenges WHERE expires_at <= datetime('now') OR user_id=?", (user_id,))
+    conn.execute("INSERT INTO login_challenges(token_hash, user_id, expires_at) VALUES (?,?,?)",
+                 (sha(raw), user_id, expires.strftime("%Y-%m-%d %H:%M:%S")))
+    return raw
+
+
+def _check_second_factor(conn, user_id: int, code: str) -> str | None:
+    """'totp' or 'recovery' if the code is good (and uses it up), else None."""
+    row = conn.execute("SELECT totp_secret, totp_last_step FROM users WHERE id=? AND totp_on_at IS NOT NULL",
+                       (user_id,)).fetchone()
+    if row is None:
+        return None
+    step = totp.verify(row["totp_secret"], code, last_step=row["totp_last_step"])
+    if step is not None:
+        conn.execute("UPDATE users SET totp_last_step=? WHERE id=?", (step, user_id))
+        return "totp"
+    norm = totp.normalize_recovery(code)
+    if len(norm) == 12:
+        used = conn.execute("UPDATE recovery_codes SET used_at=datetime('now') WHERE user_id=? AND code_hash=? AND used_at IS NULL",
+                            (user_id, sha(norm))).rowcount
+        if used:
+            return "recovery"
+    return None
+
+
+def _recovery_left(conn, user_id: int) -> int:
+    return conn.execute("SELECT count(*) FROM recovery_codes WHERE user_id=? AND used_at IS NULL", (user_id,)).fetchone()[0]
+
+
+def _new_recovery_codes(conn, user_id: int) -> list[str]:
+    codes = totp.new_recovery_codes()
+    conn.execute("DELETE FROM recovery_codes WHERE user_id=?", (user_id,))
+    conn.executemany("INSERT INTO recovery_codes(code_hash, user_id) VALUES (?,?)",
+                     [(sha(totp.normalize_recovery(c)), user_id) for c in codes])
+    return codes
+
+
+class SecondStep(BaseModel):
+    ticket: str = Field(max_length=200)
+    code: str = Field(max_length=40)
+
+
+@app.post("/api/login/2fa")
+def login_second_step(body: SecondStep, request: Request, response: Response, conn=Depends(acct)):
+    _require_header(request)
+    # Errors are raised after the transaction commits, so a wrong guess is always counted.
+    error = None
+    with core.tx(conn):
+        ch = conn.execute("SELECT * FROM login_challenges WHERE token_hash=? AND expires_at > datetime('now')",
+                          (sha(body.ticket),)).fetchone()
+        if ch is None:
+            error = (401, "That took too long. Log in again.")
+        elif _limited(f"2fa|{ch['user_id']}", 10, 900):
+            error = (429, "Too many attempts. Try again in 15 minutes.")
+        else:
+            uid = ch["user_id"]
+            kind = _check_second_factor(conn, uid, body.code)
+            if kind is None:
+                _hit(f"2fa|{uid}")
+                if ch["tries"] + 1 >= CHALLENGE_TRIES:
+                    conn.execute("DELETE FROM login_challenges WHERE token_hash=?", (ch["token_hash"],))
+                    error = (401, "Too many wrong codes. Log in again.")
+                else:
+                    conn.execute("UPDATE login_challenges SET tries=tries+1 WHERE token_hash=?", (ch["token_hash"],))
+                    error = (401, "That code isn't right. Check the time on your phone and try the newest code.")
+            else:
+                conn.execute("DELETE FROM login_challenges WHERE token_hash=?", (ch["token_hash"],))
+                _start_session(conn, uid, response, request)
+                out = {"ok": True}
+                if kind == "recovery":
+                    out["recovery_left"] = _recovery_left(conn, uid)
+    if error:
+        raise HTTPException(*error)
+    return out
 
 
 @app.post("/api/logout")
@@ -458,6 +551,8 @@ def verify(body: TokenIn, request: Request, response: Response, conn=Depends(acc
                                     f"The email on your Banktab account was changed to {t['email']}.\n\n"
                                     "If that wasn't you, reset your password right away and tell whoever runs your Banktab server.")
         conn.execute("UPDATE users SET email_verified_at=datetime('now') WHERE id=?", (t["user_id"],))
+        if _twofa_on(conn, t["user_id"]):
+            return {"ok": True, "login": True}  # an email link alone never skips the two-step code
         _start_session(conn, t["user_id"], response, request)
     return {"ok": True}
 
@@ -496,6 +591,8 @@ def reset(body: ResetIn, request: Request, response: Response, conn=Depends(acct
         t = accounts.use_token(conn, body.token, "reset")
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(body.password), t["user_id"]))
         conn.execute("DELETE FROM sessions WHERE user_id=?", (t["user_id"],))  # log out everywhere else
+        if _twofa_on(conn, t["user_id"]):
+            return {"ok": True, "login": True}  # a reset link proves the email, not the second step
         _start_session(conn, t["user_id"], response, request)
     return {"ok": True}
 
@@ -721,6 +818,103 @@ def logout_others(request: Request, user=Depends(current_user), conn=Depends(acc
     return {"signed_out": n}
 
 
+# ---------------------------------------------------------------- two-step login settings
+
+class PasswordOnly(BaseModel):
+    password: str = Field(max_length=200)
+
+
+class CodeOnly(BaseModel):
+    code: str = Field(max_length=40)
+
+
+class PasswordAndCode(BaseModel):
+    password: str = Field(max_length=200)
+    code: str = Field(max_length=40)
+
+
+def _confirm_password(conn, user, password: str) -> None:
+    if _limited(f"pw|{user['id']}", 5, 900):
+        raise HTTPException(429, "Too many attempts. Try again in 15 minutes.")
+    row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()
+    if not check_password(password, row["password_hash"]):
+        _hit(f"pw|{user['id']}")
+        raise accounts.AccountError("Your password isn't right.")
+
+
+def _confirm_code(conn, user, code: str) -> None:
+    if _limited(f"2fa|{user['id']}", 10, 900):
+        raise HTTPException(429, "Too many attempts. Try again in 15 minutes.")
+    with core.tx(conn):
+        kind = _check_second_factor(conn, user["id"], code)
+    if kind is None:
+        _hit(f"2fa|{user['id']}")
+        raise accounts.AccountError("That code isn't right. Use the newest code from your app, or a recovery code.")
+
+
+@app.get("/api/account/2fa")
+def twofa_status(user=Depends(current_user), conn=Depends(acct)):
+    return {"on": bool(user["totp_on_at"]), "since": user["totp_on_at"],
+            "recovery_left": _recovery_left(conn, user["id"]) if user["totp_on_at"] else 0}
+
+
+@app.post("/api/account/2fa/start")
+def twofa_start(body: PasswordOnly, user=Depends(current_user), conn=Depends(acct)):
+    """Step 1 of turning it on: a fresh secret to scan. Nothing changes until it's confirmed."""
+    if user["totp_on_at"]:
+        raise accounts.AccountError("Two-step login is already on.")
+    _confirm_password(conn, user, body.password)
+    secret = totp.new_secret()
+    conn.execute("UPDATE users SET totp_secret=?, totp_last_step=NULL WHERE id=?", (secret, user["id"]))
+    link = totp.uri(secret, user["email"] or user["username"])
+    return {"secret": secret, "uri": link, "qr": totp.qr_svg_data_uri(link)}
+
+
+@app.post("/api/account/2fa/enable")
+def twofa_enable(body: CodeOnly, request: Request, user=Depends(current_user), conn=Depends(acct)):
+    """Step 2: prove the app works by typing a code. Returns the recovery codes, shown once."""
+    if user["totp_on_at"]:
+        raise accounts.AccountError("Two-step login is already on.")
+    if _limited(f"2fa|{user['id']}", 10, 900):
+        raise HTTPException(429, "Too many attempts. Try again in 15 minutes.")
+    row = conn.execute("SELECT totp_secret FROM users WHERE id=?", (user["id"],)).fetchone()
+    if not row["totp_secret"]:
+        raise accounts.AccountError("Start again: scan the code first.")
+    step = totp.verify(row["totp_secret"], body.code)
+    if step is None:
+        _hit(f"2fa|{user['id']}")
+        raise accounts.AccountError("That code isn't right. Check the time on your phone and try the newest code.")
+    with core.tx(conn):
+        conn.execute("UPDATE users SET totp_on_at=datetime('now'), totp_last_step=? WHERE id=?", (step, user["id"]))
+        codes = _new_recovery_codes(conn, user["id"])
+        # Devices that logged in without a code are signed out; this one stays.
+        conn.execute("DELETE FROM sessions WHERE user_id=? AND token_hash != ?", (user["id"], sha(request.cookies.get(COOKIE, ""))))
+    return {"recovery_codes": codes}
+
+
+@app.post("/api/account/2fa/recovery-codes")
+def twofa_new_codes(body: PasswordAndCode, user=Depends(current_user), conn=Depends(acct)):
+    if not user["totp_on_at"]:
+        raise accounts.AccountError("Two-step login is off.")
+    _confirm_password(conn, user, body.password)
+    _confirm_code(conn, user, body.code)
+    with core.tx(conn):
+        codes = _new_recovery_codes(conn, user["id"])
+    return {"recovery_codes": codes}
+
+
+@app.post("/api/account/2fa/disable")
+def twofa_disable(body: PasswordAndCode, user=Depends(current_user), conn=Depends(acct)):
+    if not user["totp_on_at"]:
+        raise accounts.AccountError("Two-step login is already off.")
+    _confirm_password(conn, user, body.password)
+    _confirm_code(conn, user, body.code)
+    with core.tx(conn):
+        conn.execute("UPDATE users SET totp_secret=NULL, totp_on_at=NULL, totp_last_step=NULL WHERE id=?", (user["id"],))
+        conn.execute("DELETE FROM recovery_codes WHERE user_id=?", (user["id"],))
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- first-run setup
 
 class SetupCategory(BaseModel):
@@ -779,7 +973,8 @@ def state(ym: str | None = None, user=Depends(current_user), conn=Depends(db)):
         ym = opens[-1] if opens else months[-1]["ym"]
     core.valid_ym(ym)
     return {
-        "user": {k: user[k] for k in ("id", "username", "email", "display_name", "role", "theme", "accent")},
+        "user": {**{k: user[k] for k in ("id", "username", "email", "display_name", "role", "theme", "accent")},
+                 "twofa": bool(user["totp_on_at"])},
         "household": {"id": user["household_id"], "name": user["household_name"], "setup_done": bool(user["setup_done"]),
                       "currency": user["currency"]},
         "today": dt.date.today().isoformat(),
