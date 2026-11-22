@@ -44,6 +44,9 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE categories ADD COLUMN is_investment INTEGER NOT NULL DEFAULT 0")
         # Starting point for the imported sheet; changeable in Settings -> Categories.
         conn.execute("UPDATE categories SET is_investment=1 WHERE name IN ('Roth IRA', 'ETF Investment')")
+    if "goal_cents" not in cols:
+        conn.execute("ALTER TABLE categories ADD COLUMN goal_cents INTEGER")
+        conn.execute("ALTER TABLE categories ADD COLUMN goal_ym TEXT")
 
 
 # Year an entry counts toward in tracker reports: purchase date, else month, else known year.
@@ -83,6 +86,42 @@ def valid_ym(ym: str) -> str:
     except Exception:
         raise BudgetError(f"Bad month '{ym}'")
     return ym
+
+
+def months_between(a: str, b: str) -> int:
+    """Whole months from `a` to `b` ('2026-11' -> '2027-02' is 3)."""
+    return (int(b[:4]) * 12 + int(b[5:7])) - (int(a[:4]) * 12 + int(a[5:7]))
+
+
+def add_months(ym: str, n: int) -> str:
+    total = int(ym[:4]) * 12 + int(ym[5:7]) - 1 + n
+    return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+
+def goal_progress(*, balance: int, budget: int, goal_cents: int, goal_ym: str | None, ym: str) -> dict:
+    """How a category's bank balance stands against its savings goal, as of the end of `ym`.
+
+    The balance already includes `ym`'s budget, so the months that can still add money are the
+    ones after `ym` up to and including the goal month.
+    status: done / on_track / behind / due (goal month reached, still short) / open (no date).
+    """
+    need = max(goal_cents - balance, 0)
+    out = {"goal_cents": goal_cents, "goal_ym": goal_ym, "saved": balance, "need": need,
+           "pct": max(0.0, min(1.0, balance / goal_cents)) if goal_cents else 1.0,
+           "months_left": None, "per_month": None, "eta_ym": None}
+    if need == 0:
+        return {**out, "status": "done"}
+    if goal_ym:
+        left = months_between(ym, goal_ym)
+        out["months_left"] = max(left, 0)
+        if left <= 0:
+            return {**out, "status": "due"}
+        per = -(-need // left)  # round up to the cent
+        out["per_month"] = per
+        return {**out, "status": "on_track" if budget >= per else "behind"}
+    if budget > 0:
+        out["eta_ym"] = add_months(ym, -(-need // budget))
+    return {**out, "status": "open"}
 
 
 def bill_monthly_cents(conn, category_id: int) -> int:
@@ -208,7 +247,7 @@ def month_summary(conn, ym: str) -> dict:
                              WHERE t.ym = mb.ym AND t.category_id = mb.category_id), 0) AS spent
             FROM month_budgets mb
         )
-        SELECT c.id, c.name, c.grp, c.sort, c.archived, c.budget_from_bills,
+        SELECT c.id, c.name, c.grp, c.sort, c.archived, c.budget_from_bills, c.goal_cents, c.goal_ym,
                COALESCE(cur.budget, 0) AS budget,
                COALESCE(cur.spent, 0)  AS spent,
                (SELECT COALESCE(sum(p.budget - p.spent), 0) FROM per p
@@ -224,6 +263,9 @@ def month_summary(conn, ym: str) -> dict:
     for r in rows:
         d = dict(r)
         d["left"] = d["budget"] - d["spent"]
+        goal_cents, goal_ym = d.pop("goal_cents"), d.pop("goal_ym")
+        d["goal"] = goal_progress(balance=d["balance"], budget=d["budget"], goal_cents=goal_cents,
+                                  goal_ym=goal_ym, ym=ym) if goal_cents else None
         # Hide archived categories that have nothing going on.
         if d["archived"] and not d["in_month"] and d["balance"] == 0:
             continue

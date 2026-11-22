@@ -443,6 +443,53 @@ async function renderSetup() {
 function leftClass(left, bank) { return left >= 0 ? null : bank < 0 ? "neg" : "warn-text"; }
 const leftTitle = (left, bank) => left < 0 && bank >= 0 ? "Over this month's budget, covered by money saved in this category" : null;
 
+// ------------------------------------------------------------------ savings goals
+// A goal is a target for a category's bank balance, with an optional month to reach it by.
+
+function goalText(g, budget) {  // -> [sentence, css class]
+  if (g.status === "done") return ["Goal reached", "good-text"];
+  const by = g.goal_ym ? ymLabel(g.goal_ym) : null;
+  if (g.status === "due") return [`${money(g.need)} short of the goal for ${by}`, "neg"];
+  if (g.status === "on_track") return [`On track for ${by}: needs ${money(g.per_month)}/mo, budget is ${money(budget)}`, "good-text"];
+  if (g.status === "behind") return [`Needs ${money(g.per_month)}/mo to reach it by ${by}; budget is ${money(budget)}`, "warn-text"];
+  return g.eta_ym ? [`${money(g.need)} to go, about ${ymLabel(g.eta_ym)} at ${money(budget)}/mo`, null]
+    : [`${money(g.need)} to go. Give it a monthly budget to start saving`, null];
+}
+
+function goalBlock(c, title = c.name) {
+  const g = c.goal, [text, cls] = goalText(g, c.budget);
+  return el("div.goal", {},
+    el("div.name", {}, title),
+    el("div.amt.num", {}, money(Math.max(g.saved, 0)), el("span.faint", {}, " of " + money(g.goal_cents))),
+    el("div.bar", { class: g.status === "done" ? "done" : null, role: "progressbar", "aria-valuenow": Math.round(g.pct * 100), "aria-valuemin": 0, "aria-valuemax": 100, "aria-label": `${c.name} goal progress` },
+      el("i", { style: `width:${(g.pct * 100).toFixed(1)}%` })),
+    el("div.sub", { class: cls }, text));
+}
+
+function goalDialog(cat) {
+  const amount = el("input.input.num", { value: cat.goal_cents ? centsToInput(cat.goal_cents) : "", inputmode: "decimal", placeholder: "e.g. 3000", required: true });
+  const month = el("input.input", { type: "month", value: cat.goal_ym || "", min: todayISO().slice(0, 7), "aria-label": "Reach it by (optional)" });
+  const close = modal(cat.goal_cents ? `Goal for ${cat.name}` : `Set a goal for ${cat.name}`, el("form.form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const v = parseMoney(amount.value);
+      if (v === null || v <= 0) return toast("Enter the amount you want saved", true);
+      if (month.value && !/^\d{4}-\d{2}$/.test(month.value)) return toast("Pick a month like 2027-06", true);
+      try { await api("PATCH", `/api/categories/${cat.id}`, { goal_cents: v, goal_ym: month.value || null }); close(); toast("Goal saved"); render(); }
+      catch (x) { toast(x.message, true); }
+    },
+  },
+    el("p.muted", { style: "margin:0" }, `Progress is this category's bank balance: everything budgeted into ${cat.name} and not spent.`),
+    el("div.row2", {}, el("div.field", {}, el("label", {}, "Save up to"), amount), el("div.field", {}, el("label", {}, "By (optional)"), month)),
+    el("div.actions", {},
+      cat.goal_cents ? el("button.btn.danger", { type: "button", onclick: async () => {
+        try { await api("PATCH", `/api/categories/${cat.id}`, { goal_cents: null }); close(); toast("Goal removed"); render(); }
+        catch (x) { toast(x.message, true); }
+      } }, "Remove goal") : null,
+      el("button.btn", { type: "button", onclick: () => close() }, "Cancel"),
+      el("button.btn.primary", { type: "submit" }, "Save goal"))));
+}
+
 // Close / reopen button for the month being viewed, shown in the header.
 // The oldest open month can be closed, including the current one (early close, e.g. on the 29th);
 // only the latest closed month can be reopened.
@@ -522,10 +569,16 @@ async function renderDashboard(ym) {
     el("tfoot", {}, el("tr", {}, el("td", {}, "Total"), el("td.r.num.opt", {}, money(sum(cats, "budget"))),
       cell(sum(cats, "spent"), false), el("td.r.num", { class: leftClass(sum(cats, "left"), sum(cats, "balance")) }, money(sum(cats, "left"))), cell(sum(cats, "balance")), el("td.opt", {})))));
 
+  const withGoals = m.categories.filter((c) => c.goal && !c.archived);
+  const goals = withGoals.length ? [
+    el("div.section-h", {}, el("h2", {}, "Savings goals")),
+    el("div.card.goals", {}, withGoals.map((c) => el("a.goal-link", { href: `#/cat/${c.id}/${m.ym}` }, goalBlock(c))))] : null;
+
   $app.replaceChildren(shell("dash",
     monthHeader("#/dash", monthAction()),
-    banner, stats, table,
-    el("p.small.faint", {}, "Tap a category for its entries and history. Months = how many months of budget the bank holds.")));
+    banner, stats, table, goals,
+    el("p.small.faint", {}, "Tap a category for its entries and history. Months = how many months of budget the bank holds.",
+      withGoals.length ? null : " Saving up for something? Open a category and set a goal.")));
 }
 
 // ------------------------------------------------------------------ month view
@@ -673,10 +726,12 @@ async function renderCategory(id, ym) {
       el("div.card.stat", {}, el("div.label", {}, "Budget this month"), isOpen ? budgetInput : el("div.value", {}, moneyEl(c.budget)),
         c.budget_from_bills ? el("div.small.faint", {}, "Set from your bills list") : null),
       stat("Spent (net)", c.spent), stat("Left this month", c.left), stat("In the bank", c.balance)),
-    isOpen ? el("div.actions", { style: "margin-bottom:14px" },
-      el("a.btn.primary", { href: `#/add?cat=${id}&ym=${ym}` }, "Add entry"),
-      el("a.btn", { href: `#/add?kind=move&to=${id}&ym=${ym}` }, "Move money in"),
-      el("a.btn", { href: `#/add?kind=move&from=${id}&ym=${ym}` }, "Move money out")) : null,
+    c.goal ? el("div.card.goals", { style: "margin-bottom:12px" }, goalBlock(c, "Savings goal")) : null,
+    el("div.actions", { style: "margin-bottom:14px" },
+      isOpen ? el("a.btn.primary", { href: `#/add?cat=${id}&ym=${ym}` }, "Add entry") : null,
+      isOpen ? el("a.btn", { href: `#/add?kind=move&to=${id}&ym=${ym}` }, "Move money in") : null,
+      isOpen ? el("a.btn", { href: `#/add?kind=move&from=${id}&ym=${ym}` }, "Move money out") : null,
+      c.archived ? null : el("button.btn", { type: "button", onclick: () => goalDialog(catById(id)) }, c.goal ? "Edit goal" : "Set a goal")),
     el("div.section-h", {}, el("h2", {}, "Last 12 months")), histWrap,
     el("div.section-h", {}, el("h2", {}, `Entries in ${ymLabel(ym)}`)), txWrap));
 

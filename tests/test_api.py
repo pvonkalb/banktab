@@ -185,3 +185,59 @@ def test_batch_entries(client):
         {"ym": ym, "category_id": 99, "amount_cents": 100, "description": "bad"}]})
     assert bad.status_code == 400 and bad.json()["detail"].startswith("Row 2")
     assert "fine" not in {t["description"] for t in client.get(f"/api/transactions?ym={ym}").json()}
+
+
+def test_goal_progress_math():
+    g = core.goal_progress
+    # no date: how long at the current budget
+    r = g(balance=50000, budget=25000, goal_cents=200000, goal_ym=None, ym="2026-11")
+    assert (r["status"], r["need"], r["eta_ym"], r["pct"]) == ("open", 150000, "2027-05", 0.25)
+    # dated: months after the viewed month count; per month rounds up to the cent
+    r = g(balance=0, budget=10000, goal_cents=100000, goal_ym="2027-02", ym="2026-11")
+    assert (r["months_left"], r["per_month"], r["status"]) == (3, 33334, "behind")
+    assert g(balance=0, budget=40000, goal_cents=100000, goal_ym="2027-02", ym="2026-11")["status"] == "on_track"
+    # goal month reached and still short; reached goal
+    assert g(balance=10, budget=0, goal_cents=100, goal_ym="2026-11", ym="2026-11")["status"] == "due"
+    r = g(balance=300, budget=0, goal_cents=100, goal_ym="2026-11", ym="2026-11")
+    assert (r["status"], r["need"], r["pct"]) == ("done", 0, 1.0)
+    # a negative bank never shows negative progress
+    assert g(balance=-500, budget=0, goal_cents=1000, goal_ym=None, ym="2026-11")["pct"] == 0.0
+
+
+def test_savings_goal_api(client):
+    login(client)
+    ym = client.get("/api/state").json()["summary"]["ym"]
+    goal_ym = core.add_months(ym, 4)
+    assert client.patch("/api/categories/2", headers=H, json={"goal_cents": 500000, "goal_ym": goal_ym}).status_code == 200
+    st = client.get("/api/state").json()
+    misc = next(c for c in st["summary"]["categories"] if c["id"] == 2)
+    # Misc budgets 440.00 a month, so it holds 440.00 now and needs 4,560.00 over 4 more months
+    assert misc["goal"]["need"] == 500000 - 44000 and misc["goal"]["months_left"] == 4
+    assert misc["goal"]["per_month"] == 114000 and misc["goal"]["status"] == "behind"
+    assert next(c for c in st["categories"] if c["id"] == 2)["goal_ym"] == goal_ym
+    food = next(c for c in st["summary"]["categories"] if c["id"] == 1)
+    assert food["goal"] is None
+    # bad month and non-positive amounts are rejected
+    assert client.patch("/api/categories/2", headers=H, json={"goal_ym": "2027-13"}).status_code == 400
+    assert client.patch("/api/categories/2", headers=H, json={"goal_cents": 0}).status_code == 422
+    # date only can be cleared; removing the amount removes the whole goal
+    client.patch("/api/categories/2", headers=H, json={"goal_ym": None})
+    assert next(c for c in client.get("/api/state").json()["categories"] if c["id"] == 2)["goal_ym"] is None
+    client.patch("/api/categories/2", headers=H, json={"goal_cents": None})
+    misc = next(c for c in client.get("/api/state").json()["summary"]["categories"] if c["id"] == 2)
+    assert misc["goal"] is None
+
+
+def test_goal_columns_added_to_older_databases(tmp_path):
+    conn = core.connect(tmp_path / "old.db")
+    old = core.SCHEMA.read_text(encoding="utf-8").replace(
+        "    is_investment        INTEGER NOT NULL DEFAULT 0,  -- reports count it as invested, not spent\n"
+        "    goal_cents           INTEGER,           -- savings goal: target bank balance (NULL = no goal)\n"
+        "    goal_ym              TEXT               -- optional target month 'YYYY-MM' for the goal\n",
+        "    is_investment        INTEGER NOT NULL DEFAULT 0\n")
+    assert "goal_cents" not in old
+    conn.executescript(old)
+    core.init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(categories)")}
+    assert {"goal_cents", "goal_ym"} <= cols
+    conn.close()

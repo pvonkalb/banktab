@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS categories (
     default_budget_cents INTEGER NOT NULL DEFAULT 0,
     budget_from_bills    INTEGER NOT NULL DEFAULT 0,  -- 1 = default budget is the sum of linked bills
     archived             INTEGER NOT NULL DEFAULT 0,
-    is_investment        INTEGER NOT NULL DEFAULT 0   -- reports count it as invested, not spent
+    is_investment        INTEGER NOT NULL DEFAULT 0,  -- reports count it as invested, not spent
+    goal_cents           INTEGER,           -- savings goal: target bank balance (NULL = no goal)
+    goal_ym              TEXT               -- optional target month 'YYYY-MM' for the goal
 );
 
 CREATE TABLE IF NOT EXISTS months (

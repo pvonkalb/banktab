@@ -761,7 +761,8 @@ def setup(body: SetupIn, user=Depends(current_user), conn=Depends(db), aconn=Dep
 
 def _cats(conn):
     return [dict(r) for r in conn.execute(
-        "SELECT id, name, grp, sort, default_budget_cents, budget_from_bills, archived, is_investment FROM categories ORDER BY archived, sort, name")]
+        "SELECT id, name, grp, sort, default_budget_cents, budget_from_bills, archived, is_investment, goal_cents, goal_ym "
+        "FROM categories ORDER BY archived, sort, name")]
 
 
 def _tags(conn):
@@ -1040,6 +1041,9 @@ class CategoryPatch(BaseModel):
     budget_from_bills: bool | None = None
     archived: bool | None = None
     is_investment: bool | None = None
+    # Savings goal: send goal_cents null to remove the goal (its month goes with it).
+    goal_cents: int | None = Field(None, gt=0, lt=10**10)
+    goal_ym: str | None = Field(None, max_length=7)
 
 
 @app.post("/api/categories")
@@ -1072,6 +1076,13 @@ def edit_category(cid: int, body: CategoryPatch, user=Depends(current_user), con
                     core.set_month_budget(conn, ym, cid, 0)
         if f.get("default_budget_cents") is not None:
             core.set_default_budget(conn, cid, f["default_budget_cents"])
+        if "goal_cents" in f:
+            conn.execute("UPDATE categories SET goal_cents=? WHERE id=?", (f["goal_cents"], cid))
+            if f["goal_cents"] is None:
+                conn.execute("UPDATE categories SET goal_ym=NULL WHERE id=?", (cid,))
+        if "goal_ym" in f and f.get("goal_cents", 0) is not None:
+            conn.execute("UPDATE categories SET goal_ym=? WHERE id=?",
+                         (core.valid_ym(f["goal_ym"]) if f["goal_ym"] else None, cid))
         core.refresh_bill_budgets(conn)
     return {"ok": True}
 
