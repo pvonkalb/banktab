@@ -72,6 +72,10 @@ the month, and whatever's left in a tab stays there for later.
     <td><img src="docs/screenshots/import.png" alt="Bank CSV import review with categories guessed and a transfer flagged"><br><sub><b>Bank import.</b> Every row reviewed; transfers and duplicates flagged.</sub></td>
     <td><img src="docs/screenshots/theme-light.png" alt="Dashboard in the Light theme with a teal accent"><br><sub><b>Themes.</b> Bank is the default; Light, Dark, Noir and Paper are a click away.</sub></td>
   </tr>
+  <tr>
+    <td><img src="docs/screenshots/bills-due.png" alt="Dashboard with a Due this month card listing bills, each with Skip and Log buttons"><br><sub><b>Bills due.</b> One tap logs this month's bills; skip the ones you didn't pay.</sub></td>
+    <td><img src="docs/screenshots/goals.png" alt="Savings goals card: progress bars for Travel, Gifts, Car maintenance and Emergency fund with on-track and monthly-needed notes"><br><sub><b>Savings goals.</b> Progress, what's left, and the monthly amount to get there on time.</sub></td>
+  </tr>
 </table>
 
 <p align="center">
