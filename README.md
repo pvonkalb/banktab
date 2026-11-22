@@ -65,14 +65,14 @@ the month, and whatever's left in a tab stays there for later.
   </tr>
   <tr>
     <td><img src="docs/screenshots/import.png" alt="Bank CSV import review with categories guessed and a transfer flagged"><br><sub><b>Bank import.</b> Every row reviewed; transfers and duplicates flagged.</sub></td>
-    <td><img src="docs/screenshots/theme-bank.png" alt="Dashboard in the Bank theme: dark wood, parchment text and gold"><br><sub><b>Themes.</b> Bank: dark wood and gold.</sub></td>
+    <td><img src="docs/screenshots/theme-light.png" alt="Dashboard in the Light theme with a teal accent"><br><sub><b>Themes.</b> Bank is the default; Light, Dark, Noir and Paper are a click away.</sub></td>
   </tr>
 </table>
 
 <p align="center">
   <img src="docs/screenshots/phone-dashboard.png" alt="Dashboard on a phone" width="230">
   <img src="docs/screenshots/phone-add.png" alt="Adding an entry on a phone" width="230">
-  <img src="docs/screenshots/phone-month-dark.png" alt="Month view on a phone in dark mode" width="230">
+  <img src="docs/screenshots/phone-month.png" alt="Month view on a phone" width="230">
 </p>
 
 ## Quick start (Docker Compose)

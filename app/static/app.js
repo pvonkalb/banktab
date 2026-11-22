@@ -1620,9 +1620,9 @@ async function settingsHousehold(body) {
   }
 }
 
-const THEMES = [["system", "Match device", "Light or dark, following your phone or computer"], ["light", "Light", "Clean and bright"],
-  ["dark", "Dark", "Easy on the eyes at night"], ["noir", "Noir", "True black, great on OLED phones"], ["paper", "Paper", "Warm, low-glare light"],
-  ["bank", "Bank", "Dark wood and gold, like an old vault"]];
+const THEMES = [["bank", "Bank", "Dark wood and gold, like an old vault (the default)"],
+  ["system", "Match device", "Light or dark, following your phone or computer"], ["light", "Light", "Clean and bright"],
+  ["dark", "Dark", "Easy on the eyes at night"], ["noir", "Noir", "True black, great on OLED phones"], ["paper", "Paper", "Warm, low-glare light"]];
 const ACCENTS = [["teal", "Teal", "#0f766e"], ["blue", "Blue", "#1d4ed8"], ["violet", "Violet", "#6d28d9"], ["rose", "Rose", "#be123c"],
   ["amber", "Amber", "#a14a08"], ["green", "Green", "#137336"], ["graphite", "Graphite", "#334155"], ["gold", "Gold", "#c9971f"]];
 
