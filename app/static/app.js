@@ -83,8 +83,8 @@ function setCurrency(code) {
 // Theme: stored on the server per person, cached locally so theme.js can apply it before the page draws.
 function applyTheme(theme, accent) {
   const d = document.documentElement;
-  d.setAttribute("data-theme", theme || "system");
-  d.setAttribute("data-accent", accent || "teal");
+  d.setAttribute("data-theme", theme || "bank");
+  d.setAttribute("data-accent", accent || "gold");
   try { localStorage.setItem("budget-theme", JSON.stringify({ theme, accent })); } catch { /* private mode */ }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", getComputedStyle(d).getPropertyValue("--bg").trim() || "#f6f7f5");

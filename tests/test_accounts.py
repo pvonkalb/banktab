@@ -1,5 +1,7 @@
 """Households, sign-up, email links, invites, isolation, setup, CSV import, migration."""
 import re
+import sqlite3
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -391,3 +393,22 @@ def test_theme_currency_backup_health(env):
     assert r.status_code == 200 and r.content[:16] == b"SQLite format 3\x00"
     out, n, _ = accounts.backup_all(data, data / "backups", keep=2)
     assert n == 2 and (out / "accounts.db").exists()
+
+
+def test_new_accounts_start_on_bank_theme(env, monkeypatch):
+    # an accounts.db from before Bank became the default keeps 'system' as its column default,
+    # so new people must still get Bank + Gold explicitly
+    data, _ = env
+    monkeypatch.setattr(main, "SIGNUP_OPEN", True)
+    old_schema = (Path(accounts.__file__).parent / "accounts_schema.sql").read_text(encoding="utf-8")
+    old_schema = old_schema.replace("DEFAULT 'bank'", "DEFAULT 'system'").replace("DEFAULT 'gold'", "DEFAULT 'teal'")
+    pre = sqlite3.connect(accounts.accounts_path(data)); pre.executescript(old_schema); pre.close()
+    c = TestClient(main.app)
+    body = {"name": "Kim", "email": "kim@example.com", "password": "kims long passphrase"}
+    assert c.post("/api/signup", headers=H, json=body).status_code == 200
+    db = sqlite3.connect(accounts.accounts_path(data))
+    assert db.execute("SELECT dflt_value FROM pragma_table_info('users') WHERE name='theme'").fetchone()[0] == "'system'"
+    assert db.execute("SELECT theme, accent FROM users WHERE email='kim@example.com'").fetchone() == ("bank", "gold")
+    db.close()
+    html = c.get("/").text
+    assert '<html lang="en" data-theme="bank" data-accent="gold">' in html   # sign-in screen

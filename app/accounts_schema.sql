@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash     TEXT NOT NULL,
     household_id      INTEGER NOT NULL REFERENCES households(id),
     role              TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
-    theme             TEXT NOT NULL DEFAULT 'system',         -- system / light / dark / noir / paper / bank
-    accent            TEXT NOT NULL DEFAULT 'teal',
+    theme             TEXT NOT NULL DEFAULT 'bank',           -- system / light / dark / noir / paper / bank
+    accent            TEXT NOT NULL DEFAULT 'gold',
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_users_household ON users(household_id);

@@ -37,6 +37,12 @@ def accounts_path(data_dir: Path) -> Path:
     return data_dir / "accounts.db"
 
 
+# New accounts start on the Bank theme with the Gold accent (people can change it in Settings).
+# Set explicitly on every new user, because older accounts.db files keep their original column default.
+DEFAULT_THEME = "bank"
+DEFAULT_ACCENT = "gold"
+
+
 def household_path(data_dir: Path, household_id: int) -> Path:
     return data_dir / "households" / f"{int(household_id)}.db"
 
@@ -53,7 +59,7 @@ def open_accounts(data_dir: Path) -> sqlite3.Connection:
 def _ensure_columns(conn) -> None:
     """Columns added after the first release."""
     add = {"households": [("currency", "TEXT NOT NULL DEFAULT 'USD'")],
-           "users": [("theme", "TEXT NOT NULL DEFAULT 'system'"), ("accent", "TEXT NOT NULL DEFAULT 'teal'")]}
+           "users": [("theme", f"TEXT NOT NULL DEFAULT '{DEFAULT_THEME}'"), ("accent", f"TEXT NOT NULL DEFAULT '{DEFAULT_ACCENT}'")]}
     for table, cols in add.items():
         have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, decl in cols:
@@ -266,8 +272,9 @@ def migrate_legacy(legacy_db: Path, data_dir: Path, household_name: str) -> int:
     with core.tx(acct):
         for u in users:  # same ids, so entries keep pointing at the right person
             acct.execute(
-                "INSERT INTO users(id, username, display_name, password_hash, household_id, role) VALUES (?,?,?,?,?,'owner')",
-                (u["id"], u["username"], u["display_name"], u["password_hash"], hid))
+                "INSERT INTO users(id, username, display_name, password_hash, household_id, role, theme, accent) "
+                "VALUES (?,?,?,?,?,'owner',?,?)",
+                (u["id"], u["username"], u["display_name"], u["password_hash"], hid, DEFAULT_THEME, DEFAULT_ACCENT))
     h = core.connect(dest_path)
     h.execute("UPDATE users SET password_hash=''")  # passwords now live only in accounts.db
     h.execute("DELETE FROM sessions")

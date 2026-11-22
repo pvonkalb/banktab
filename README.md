@@ -55,7 +55,7 @@ the month, and whatever's left in a tab stays there for later.
 **Households**
 - Several households per server, **each in its own database file**.
 - Invite a partner by link; owners and members; sign-up with email confirmation; password reset.
-- Six themes (Match device, Light, Dark, Noir, Paper and Bank: dark wood and gold) and eight accent colors, per person.
+- Six themes (Bank, the default: dark wood and gold; Match device, Light, Dark, Noir and Paper) and eight accent colors, per person.
 - Installable on a phone (PWA), currency per household, CSV export and full-backup download.
 
 <table>

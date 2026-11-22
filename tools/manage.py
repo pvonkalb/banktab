@@ -78,9 +78,10 @@ def main(argv: list[str]) -> None:
         if not conn.execute("SELECT 1 FROM households WHERE id=?", (hid,)).fetchone():
             raise SystemExit(f"No household {hid}")
         uid = conn.execute(
-            "INSERT INTO users(username, email, email_verified_at, display_name, password_hash, household_id, role) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (username, email, "now" if email else None, name, accounts.hash_password(ask_password()), hid, role)).lastrowid
+            "INSERT INTO users(username, email, email_verified_at, display_name, password_hash, household_id, role, theme, accent) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (username, email, "now" if email else None, name, accounts.hash_password(ask_password()), hid, role,
+             accounts.DEFAULT_THEME, accounts.DEFAULT_ACCENT)).lastrowid
         conn.execute("UPDATE users SET email_verified_at=datetime('now') WHERE id=? AND email IS NOT NULL", (uid,))
         h = accounts.open_household(DATA_DIR, hid)
         accounts.sync_member(h, {"id": uid, "username": username, "display_name": name})

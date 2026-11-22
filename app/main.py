@@ -373,10 +373,10 @@ def first_run(body: FirstRunIn, request: Request, response: Response, conn=Depen
                                  (SELECT 1 FROM users u WHERE u.household_id = h.id) ORDER BY id LIMIT 1""").fetchone()
         hid = orphan["id"] if orphan else accounts.create_household(conn, DATA_DIR, body.household.strip() or "Our budget")
         uid = conn.execute(
-            """INSERT INTO users(username, email, email_verified_at, display_name, password_hash, household_id, role)
-               VALUES (?,?,?,?,?,?,'owner')""",
+            """INSERT INTO users(username, email, email_verified_at, display_name, password_hash, household_id, role, theme, accent)
+               VALUES (?,?,?,?,?,?,'owner',?,?)""",
             (login, email, dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if email else None,
-             body.name.strip(), hash_password(body.password), hid)).lastrowid
+             body.name.strip(), hash_password(body.password), hid, accounts.DEFAULT_THEME, accounts.DEFAULT_ACCENT)).lastrowid
         _start_session(conn, uid, response, request)
     _setup_code = None
     return {"ok": True}
@@ -404,10 +404,12 @@ def _new_user(conn, *, name, email, password, household_id, role, verified: bool
     if conn.execute("SELECT 1 FROM users WHERE username=? OR email=?", (email, email)).fetchone():
         raise accounts.AccountError("There's already an account with that email. Try logging in or resetting your password.")
     return conn.execute(
-        """INSERT INTO users(username, email, email_verified_at, verify_required, display_name, password_hash, household_id, role)
-           VALUES (?,?,?,?,?,?,?,?)""",
+        """INSERT INTO users(username, email, email_verified_at, verify_required, display_name, password_hash, household_id, role,
+                            theme, accent)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (email, email, dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if verified else None,
-         int(not verified), name.strip(), hash_password(password), household_id, role)).lastrowid
+         int(not verified), name.strip(), hash_password(password), household_id, role,
+         accounts.DEFAULT_THEME, accounts.DEFAULT_ACCENT)).lastrowid
 
 
 @app.post("/api/signup")

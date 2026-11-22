@@ -1,5 +1,5 @@
 // Caches the app shell so it opens instantly. Budget data (/api/) is never cached.
-const VERSION = "banktab-v6";
+const VERSION = "banktab-v7";
 const SHELL = ["/", "/static/styles.css?v=6", "/static/app.js?v=6", "/static/theme.js?v=6", "/static/icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
