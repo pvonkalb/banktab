@@ -416,3 +416,47 @@ def test_bill_columns_added_to_older_databases(tmp_path):
     assert {"bill_id"} <= {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
     assert tuple(conn.execute("SELECT due_month, due_day FROM bills").fetchone()) == (8, 31)
     conn.close()
+
+
+# ---------------------------------------------------------------- display keys (kitchen dashboard)
+def _display_key(hid=1, name="Kitchen"):
+    key = "bt_disp_testkey"
+    main._acct.execute("INSERT INTO display_keys(token_hash, household_id, name) VALUES (?,?,?)",
+                       (main.sha(key), hid, name))
+    return key
+
+
+def test_display_summary_needs_a_valid_key(client):
+    client.get("/api/health")                                   # opens the accounts db
+    assert client.get("/api/display/summary").status_code == 401
+    assert client.get("/api/display/summary", headers={"Authorization": "Bearer nope"}).status_code == 401
+    # a login session is not enough: this endpoint only takes display keys
+    login(client)
+    assert client.get("/api/display/summary").status_code == 401
+
+
+def test_display_summary_shows_totals_only(client):
+    login(client)
+    ym = client.get("/api/state").json()["summary"]["ym"]
+    client.post("/api/entries", headers=H, json={"ym": ym, "category_id": 1, "amount_cents": 125050,
+                                                 "description": "secret store name"})
+    key = _display_key()
+    client.cookies.clear()
+    r = client.get("/api/display/summary", headers={"Authorization": f"Bearer {key}"})
+    assert r.status_code == 200
+    d = r.json()
+    assert set(d) == {"ym", "month", "budgeted", "spent", "left", "percent_spent", "days_left", "over_budget"}
+    assert d["ym"] == ym and d["spent"] == 1250.50
+    assert d["left"] == round(d["budgeted"] - d["spent"], 2)
+    assert "Food/Drink" in d["over_budget"]                     # 1,250.50 spent of 1,200 budgeted
+    assert "secret store name" not in r.text                    # no transaction details leak
+    assert 1 <= d["days_left"] <= 31
+    row = main._acct.execute("SELECT last_used_at FROM display_keys").fetchone()
+    assert row["last_used_at"] is not None
+
+
+def test_display_key_bad_tries_are_rate_limited(client):
+    client.get("/api/health")
+    for _ in range(30):
+        client.get("/api/display/summary", headers={"Authorization": "Bearer wrong"})
+    assert client.get("/api/display/summary", headers={"Authorization": "Bearer wrong"}).status_code == 429

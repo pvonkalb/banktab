@@ -435,6 +435,39 @@ def health(conn=Depends(acct)):
     return {"ok": True, "version": VERSION}
 
 
+@app.get("/api/display/summary")
+def display_summary(request: Request, conn=Depends(acct)):
+    """Read-only month totals for a wall display, authorized by a display key (tools/manage.py).
+    Returns totals and the names of over-budget categories only: no transactions, notes or people."""
+    ip = _ip(request)
+    if _limited(f"display:{ip}", 30, 300):
+        raise HTTPException(429, "Too many requests")
+    auth = request.headers.get("authorization", "")
+    key = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    row = conn.execute("SELECT household_id FROM display_keys WHERE token_hash=?", (sha(key),)).fetchone() if key else None
+    if row is None:
+        _hit(f"display:{ip}")
+        raise HTTPException(401, "Display key required")
+    conn.execute("UPDATE display_keys SET last_used_at=datetime('now') WHERE token_hash=?", (sha(key),))
+    hconn = household_conn(row["household_id"])
+    today = dt.date.today()
+    ym = core.ym_of(today)
+    core.ensure_months(hconn, ym)
+    s = core.month_summary(hconn, ym)
+    next_first = dt.date.fromisoformat(core.next_ym(ym) + "-01")
+    over = [c["name"] for c in s["categories"] if not c["archived"] and c["left"] < 0]
+    return {
+        "ym": ym,
+        "month": today.strftime("%B"),
+        "budgeted": round(s["budgeted"] / 100, 2),
+        "spent": round(s["spent"] / 100, 2),
+        "left": round(s["left"] / 100, 2),
+        "percent_spent": round(100 * s["spent"] / s["budgeted"]) if s["budgeted"] else 0,
+        "days_left": (next_first - today).days,
+        "over_budget": over,
+    }
+
+
 class FirstRunIn(BaseModel):
     code: str = Field(max_length=20)
     name: str = Field(min_length=1, max_length=60)

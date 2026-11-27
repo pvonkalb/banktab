@@ -54,6 +54,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at  TEXT NOT NULL
 );
 
+-- Read-only display keys (e.g. a kitchen dashboard). A key can only read one household's
+-- month summary from /api/display/summary. Made and revoked with tools/manage.py. Stored hashed.
+CREATE TABLE IF NOT EXISTS display_keys (
+    token_hash    TEXT PRIMARY KEY,
+    household_id  INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    name          TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at  TEXT
+);
+
 -- One-time links: email verification, password reset, household invites. Stored hashed.
 CREATE TABLE IF NOT EXISTS tokens (
     token_hash    TEXT PRIMARY KEY,

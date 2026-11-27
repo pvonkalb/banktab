@@ -174,12 +174,27 @@ python tools/manage.py adduser sam "Sam" 1 [--member] [--email sam@example.com]
 python tools/manage.py passwd sam
 python tools/manage.py disable-2fa sam                      # lost phone and recovery codes
 python tools/manage.py delete-household 2
+python tools/manage.py display-key 1 "Kitchen screen"       # read-only key for a wall display
+python tools/manage.py display-keys | revoke-display-key 3
 python tools/backup.py                                      # one-off backup of everything
 python tools/demo.py --data demo-data                       # made-up demo household
 ```
 
 With Docker, prefix these with `docker compose exec banktab`. Moving from a spreadsheet? Export
 transactions as CSV and use **Settings → Import**.
+
+### Wall displays (Home Assistant and similar)
+
+A display key can read one household's month totals and nothing else:
+
+```sh
+curl -H "Authorization: Bearer bt_disp_..." https://banktab.example.com/api/display/summary
+# {"ym": "2026-11", "month": "November", "budgeted": 4200.0, "spent": 2871.4, "left": 1328.6,
+#  "percent_spent": 68, "days_left": 4, "over_budget": ["Eating out"]}
+```
+
+No transactions, descriptions, notes or names of people are included. Keys are stored hashed,
+show when they were last used, and can be revoked at any time.
 
 ## Development
 

@@ -10,6 +10,9 @@
     python tools/manage.py users
     python tools/manage.py logout-all
     python tools/manage.py delete-household <id>
+    python tools/manage.py display-key <household id> "<name>"       # read-only key for a wall display
+    python tools/manage.py display-keys
+    python tools/manage.py revoke-display-key <number from display-keys>
 
 Data folder: BUDGET_DATA_DIR (default ./data). Passwords are read from a hidden prompt
 (or BUDGET_PASSWORD for scripted setups).
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import secrets
 import sqlite3
 import sys
 from pathlib import Path
@@ -104,6 +108,21 @@ def main(argv: list[str]) -> None:
                                  FROM users u JOIN households h ON h.id = u.household_id ORDER BY h.id, u.id"""):
             mail = f"{r['email']}{'' if r['email_verified_at'] else ' (unconfirmed)'}" if r["email"] else ""
             print(f"{r['hid']:4} {r['name']:24} {r['username']:28} {r['display_name']:18} {r['role']:7} {mail}")
+    elif cmd == "display-key" and len(args) == 2:
+        hid = int(args[0])
+        if not conn.execute("SELECT 1 FROM households WHERE id=?", (hid,)).fetchone():
+            raise SystemExit(f"No household {hid}")
+        key = "bt_disp_" + secrets.token_urlsafe(32)
+        conn.execute("INSERT INTO display_keys(token_hash, household_id, name) VALUES (?,?,?)",
+                     (accounts.sha(key), hid, args[1]))
+        print(f"Display key for household {hid} ({args[1]}). Shown once; it can only read the month summary:\n{key}")
+    elif cmd == "display-keys":
+        for r in conn.execute("""SELECT d.rowid, d.name, d.created_at, d.last_used_at, h.id AS hid, h.name AS household
+                                 FROM display_keys d JOIN households h ON h.id = d.household_id ORDER BY d.rowid"""):
+            print(f"{r['rowid']:4} {r['hid']:4} {r['household']:24} {r['name']:24} created {r['created_at']}  last used {r['last_used_at'] or 'never'}")
+    elif cmd == "revoke-display-key" and len(args) == 1:
+        n = conn.execute("DELETE FROM display_keys WHERE rowid=?", (int(args[0]),)).rowcount
+        print("Revoked" if n else f"No display key {args[0]}")
     elif cmd == "logout-all":
         conn.execute("DELETE FROM sessions")
         print("Everyone signed out")
